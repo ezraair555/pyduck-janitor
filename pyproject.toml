@@ -9,7 +9,7 @@ description = "DuckDB-backed pyjanitor for high-performance data cleaning on lar
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Your Name", email = "your.email@example.com"}
+    {name = "EzraAir555", email = "ezraair555@gmail.com"}
 ]
 keywords = ["duckdb", "janitor", "data cleaning", "pandas", "data preprocessing", "etl"]
 classifiers = [
