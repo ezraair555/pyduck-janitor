@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyduck-janitor"
-version = "0.1.1"
+version = "0.1.2"
 description = "DuckDB-backed pyjanitor for high-performance data cleaning on large datasets"
 readme = "README.md"
 license = {text = "MIT"}
