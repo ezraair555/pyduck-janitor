@@ -197,3 +197,89 @@ class TestDuckJanitor:
         
         assert 'DuckJanitor' in repr_str
         assert 'lazy' in repr_str.lower()
+    # Regression tests for P0 fixes
+
+    def test_remove_empty_rows_and_columns(self):
+        """remove_empty should drop all-empty columns and all-empty rows."""
+        df = pd.DataFrame({
+            'A': [1, None, None],
+            'B': [None, None, None],
+            'C': ['', 'x', ''],
+        })
+        result = DuckJanitor.from_pandas(df).remove_empty().collect()
+
+        assert 'B' not in result.columns
+        assert len(result) == 2
+
+    def test_dropna_how_all(self):
+        """dropna(how='all') should keep rows where not all checked columns are null."""
+        df = pd.DataFrame({
+            'A': [None, 1, None, 4],
+            'B': [None, None, 2, 5],
+        })
+        result = DuckJanitor.from_pandas(df).dropna(how='all').collect()
+
+        assert len(result) == 3
+
+    def test_select_rows_by_index(self):
+        """select_rows should pick rows by 0-based index."""
+        df = pd.DataFrame({'A': [10, 20, 30, 40]})
+        result = DuckJanitor.from_pandas(df).select_rows([0, 2]).collect()
+
+        assert list(result['A']) == [10, 30]
+
+    def test_case_when(self):
+        """case_when should build a conditional column."""
+        df = pd.DataFrame({'A': [1, 2, 3]})
+        result = DuckJanitor.from_pandas(df).case_when(
+            [('A > 1', 'high')], 'case_col', default='low'
+        ).collect()
+
+        assert list(result['case_col']) == ['low', 'high', 'high']
+
+    def test_currency_column_to_numeric(self):
+        """currency_column_to_numeric should strip currency symbols and commas."""
+        df = pd.DataFrame({'price': ['$1,234.56', '$2,000.00']})
+        result = DuckJanitor.from_pandas(df).currency_column_to_numeric(
+            'price', 'price_num'
+        ).collect()
+
+        assert list(result['price_num']) == pytest.approx([1234.56, 2000.0])
+
+    def test_convert_date(self):
+        """convert_date should parse string dates."""
+        df = pd.DataFrame({'dt': ['2023-01-15', '2023-02-20']})
+        result = DuckJanitor.from_pandas(df).convert_date('dt', 'dt_parsed').collect()
+
+        assert result['dt_parsed'].notna().all()
+
+    def test_impute(self):
+        """impute should fill nulls with the requested statistic."""
+        df = pd.DataFrame({'A': [1, None, 3], 'B': [10, 20, 30]})
+        result = DuckJanitor.from_pandas(df).impute('A', statistic='mean').collect()
+
+        assert list(result['A']) == pytest.approx([1.0, 2.0, 3.0])
+
+    def test_conditional_join(self):
+        """conditional_join should use a single shared connection."""
+        left = DuckJanitor.from_pandas(pd.DataFrame({'A': [1, 2, 3]}))
+        right = DuckJanitor.from_pandas(pd.DataFrame({'D': [2, 3, 4]}))
+        result = left.conditional_join(right, [('A', 'D', '>')]).collect()
+
+        assert len(result) == 1
+        assert result['A'].iloc[0] == 3 and result['D'].iloc[0] == 2
+
+    def test_min_max_scale_identical_values(self):
+        """min_max_scale should not return all nulls when every value is identical."""
+        df = pd.DataFrame({'A': [5, 5, 5]})
+        result = DuckJanitor.from_pandas(df).min_max_scale('A', 'scaled').collect()
+
+        assert list(result['scaled']) == pytest.approx([0.0, 0.0, 0.0])
+
+    def test_init_rejects_mismatched_connection(self):
+        """DuckJanitor should reject a relation from a different connection."""
+        import duckdb
+        rel = duckdb.connect().from_df(pd.DataFrame({'a': [1]}))
+        with pytest.raises(ValueError):
+            DuckJanitor(rel, connection=duckdb.connect())
+

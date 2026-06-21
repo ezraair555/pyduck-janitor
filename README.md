@@ -267,6 +267,38 @@ Benchmark results vary by workload, but expect 2-10x speedups on typical data cl
 
 We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
+
+## Changelog
+
+### 0.1.1 — Connection handling and crash fixes
+
+- Fixed cross-connection crashes across `cleaning_ops.py`,
+  `cleaning_ops_extended.py`, and `cleaning_ops_final.py` by registering
+  relations on the caller's DuckDB connection instead of creating new
+  in-memory connections or relying on `FROM relation` replacement scans.
+- `DuckJanitor.__init__` now validates that the relation and connection
+  belong to the same DuckDB connection.
+- `from_parquet`, `from_csv`, and `from_sql` now return real DuckDB
+  relations without round-tripping through pandas.
+- Fixed `remove_empty` to actually remove all-empty rows (in addition to
+  all-empty columns).
+- Fixed `dropna(how='all')` boolean condition.
+- Fixed `case_when`, `currency_column_to_numeric`, `convert_date`
+  `relation.database` AttributeError crashes.
+- Fixed `impute()` `SELECT , COALESCE(...)` syntax error.
+- Fixed `conditional_join` to use a single shared connection with an
+  operator allow-list.
+- Replaced invalid `ROW() OVER ()` in `select_rows` with
+  `ROW_NUMBER() OVER ()`.
+- Added safer handling for identical-value columns in `min_max_scale`.
+- Added 10 regression tests. Full suite: 40 passing.
+
+### 0.1.0 — Initial release
+
+- DuckDB-backed pyjanitor-style cleaning API with 51 functions.
+- Lazy SQL evaluation for simple operations; hybrid SQL/Python for
+  complex operations.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.

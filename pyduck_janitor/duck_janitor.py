@@ -42,10 +42,34 @@ class DuckJanitor:
         relation : duckdb.DuckDBPyRelation
             The DuckDB relation.
         connection : duckdb.DuckDBPyConnection, optional
-            The DuckDB connection. Created automatically if not provided.
+            The DuckDB connection that owns the relation. If omitted, an attempt
+            is made to use a fresh connection; this only succeeds for relations
+            that can be registered there (e.g., created by the same process).
         """
+        if connection is None:
+            connection = duckdb.connect()
+            try:
+                temp_name = f"_validate_{id(relation)}"
+                connection.register(temp_name, relation)
+                connection.execute(f"SELECT 1 FROM {temp_name} LIMIT 0")
+            except Exception as exc:
+                raise ValueError(
+                    "Could not derive a matching DuckDB connection from the relation. "
+                    "Pass the connection used to create the relation explicitly."
+                ) from exc
+
+        # Validate that the relation belongs to the provided connection.
+        try:
+            temp_name = f"_validate_{id(relation)}"
+            connection.register(temp_name, relation)
+            connection.execute(f"SELECT 1 FROM {temp_name} LIMIT 0")
+        except Exception as exc:
+            raise ValueError(
+                "The relation does not belong to the provided DuckDB connection."
+            ) from exc
+
         self._relation = relation
-        self._connection = connection or duckdb.connect()
+        self._connection = connection
     
     @classmethod
     def from_pandas(cls, df: pd.DataFrame) -> 'DuckJanitor':
@@ -88,14 +112,15 @@ class DuckJanitor:
         >>> dj = DuckJanitor.from_parquet('s3://bucket/data.parquet')
         """
         conn = duckdb.connect()
-        
+
         if isinstance(path, list):
-            path_str = '[' + ', '.join(f"'{p}'" for p in path) + ']'
+            path_list = [str(p) for p in path]
+            relation = conn.query(
+                f"SELECT * FROM read_parquet([{', '.join(repr(p) for p in path_list)}])"
+            )
         else:
-            path_str = f"'{path}'"
-        
-        relation = conn.execute(f"SELECT * FROM read_parquet({path_str})").fetchdf()
-        relation = conn.from_df(relation)
+            relation = conn.query(f"SELECT * FROM read_parquet({repr(str(path))})")
+
         return cls(relation, connection=conn)
     
     @classmethod
@@ -116,9 +141,7 @@ class DuckJanitor:
             A DuckJanitor instance.
         """
         conn = duckdb.connect()
-        path_str = str(path)
-        relation = conn.execute(f"SELECT * FROM read_csv_auto('{path_str}')").fetchdf()
-        relation = conn.from_df(relation)
+        relation = conn.read_csv(str(path), **kwargs)
         return cls(relation, connection=conn)
     
     @classmethod
@@ -139,7 +162,7 @@ class DuckJanitor:
             A DuckJanitor instance.
         """
         conn = connection or duckdb.connect()
-        relation = conn.execute(query)
+        relation = conn.query(query)
         return cls(relation, connection=conn)
     
     def collect(self) -> pd.DataFrame:
@@ -441,7 +464,7 @@ class DuckJanitor:
         temp_name = f"_temp_{id(self._relation)}"
         self._connection.register(temp_name, self._relation)
         query = query.replace('self', temp_name)
-        new_relation = self._connection.execute(query)
+        new_relation = self._connection.query(query)
         return DuckJanitor(new_relation, self._connection)
     
     def bin_numeric(self, column: str, target_column: str, bins: Union[int, List[float]] = 5,

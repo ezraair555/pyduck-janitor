@@ -139,7 +139,7 @@ class TestCleaningOps:
     
     def test_filter_column_callable(self, conn, sample_relation):
         """Test filtering with callable."""
-        result = filter_column(sample_relation, 'Age', lambda x: x > 25)
+        result = filter_column(sample_relation, 'Age', lambda x: x > 25, conn=conn)
         result_df = result.df()
         
         assert (result_df['Age'] > 25).all()
