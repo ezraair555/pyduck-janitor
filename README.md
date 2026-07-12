@@ -1,5 +1,9 @@
 # pyduck-janitor
 
+<p align="center">
+  <img src="docs/duck_janitor_logo.jpg" alt="pyduck-janitor logo" width="200" style="border-radius: 10%;"/>
+</p>
+
 **DuckDB-backed pyjanitor for high-performance data cleaning on large datasets**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
