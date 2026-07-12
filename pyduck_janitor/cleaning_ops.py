@@ -103,8 +103,13 @@ def clean_names(relation: duckdb.DuckDBPyRelation, strip_underscores: bool = Tru
         new_name = new_name.strip('_')
 
         # Handle duplicate names
+        base_name = new_name
         if new_name in [c[1] for c in new_columns]:
-            new_name = f"{new_name}_dup"
+            new_name = f"{base_name}_dup"
+            counter = 1
+            while new_name in [c[1] for c in new_columns]:
+                new_name = f"{base_name}_dup_{counter}"
+                counter += 1
 
         new_columns.append((col, new_name))
 
@@ -177,9 +182,19 @@ def add_column(relation: duckdb.DuckDBPyRelation, column_name: str,
     """
     
     if isinstance(values, str):
-        # SQL expression
+        # Could be a SQL expression or a column name, or a literal string (which needs quoting).
         table_name = _register_relation(conn, relation)
-        query = f"SELECT *, ({values}) AS {_quote_id(column_name)} FROM {table_name}"
+        # Try executing as SQL expression/column first
+        try:
+            query = f"SELECT *, ({values}) AS {_quote_id(column_name)} FROM {table_name}"
+            # Test query execution (using LIMIT 0 to avoid computing rows)
+            conn.execute(f"SELECT ({values}) FROM {table_name} LIMIT 0")
+            return conn.query(query)
+        except Exception as exc:
+            # If binder/parsing exception (like missing column reference), treat as string literal
+            literal_val = _sql_literal(values)
+            query = f"SELECT *, {literal_val} AS {_quote_id(column_name)} FROM {table_name}"
+            return conn.query(query)
     elif isinstance(values, list):
         # Create from list - need to use a different approach
         # For simplicity, convert to pandas, add column, convert back
@@ -193,13 +208,10 @@ def add_column(relation: duckdb.DuckDBPyRelation, column_name: str,
         return conn.from_df(df)
     else:
         # Scalar value
-        if isinstance(values, str):
-            values = _sql_literal(values)
+        literal_val = _sql_literal(values)
         table_name = _register_relation(conn, relation)
-        query = f"SELECT *, {values} AS {_quote_id(column_name)} FROM {table_name}"
+        query = f"SELECT *, {literal_val} AS {_quote_id(column_name)} FROM {table_name}"
         return conn.query(query)
-
-    return conn.query(query)
 
 
 def rename_column(relation: duckdb.DuckDBPyRelation, old_name: str,
@@ -350,13 +362,7 @@ def filter_column(relation: duckdb.DuckDBPyRelation, column: str,
     duckdb.DuckDBPyRelation
         Filtered relation.
     """
-    if isinstance(criteria, str):
-        # SQL WHERE clause
-        table_name = _register_relation(conn, relation)
-        query = f"SELECT * FROM {table_name} WHERE {criteria}"
-    elif callable(criteria):
-        # Convert callable to SQL - this is a simplification
-        # For complex callables, need to evaluate in Python
+    if callable(criteria):
         if conn is None:
             raise ValueError(
                 "A DuckDB connection is required when using a callable criteria."
@@ -365,9 +371,22 @@ def filter_column(relation: duckdb.DuckDBPyRelation, column: str,
         mask = criteria(df[column])
         df = df[mask]
         return conn.from_df(df)
-    else:
-        raise ValueError("criteria must be a callable or SQL string")
     
+    table_name = _register_relation(conn, relation)
+    if isinstance(criteria, str):
+        # Try executing as raw SQL WHERE clause first
+        try:
+            query_test = f"SELECT 1 FROM {table_name} WHERE {criteria} LIMIT 0"
+            conn.execute(query_test)
+            # Valid raw SQL WHERE clause
+            query = f"SELECT * FROM {table_name} WHERE {criteria}"
+            return conn.query(query)
+        except Exception:
+            pass
+
+    # Fallback: treat criteria as a literal value and compare for equality
+    literal_val = _sql_literal(criteria)
+    query = f"SELECT * FROM {table_name} WHERE {_quote_id(column)} = {literal_val}"
     return conn.query(query)
 
 
@@ -395,9 +414,9 @@ def coalesce(relation: duckdb.DuckDBPyRelation, columns: List[str],
 
     coalesce_expr = f"COALESCE({', '.join(_quote_id(col) for col in columns)}) AS {_quote_id(target_column)}"
 
-    # Get all columns except the ones being coalesced
+    # Get all columns except the ones being coalesced and the target column itself (if it already exists)
     old_columns = relation.columns
-    other_cols = [col for col in old_columns if col not in columns]
+    other_cols = [col for col in old_columns if col not in columns and col != target_column]
 
     select_parts = [_quote_id(col) for col in other_cols] + [coalesce_expr]
     query = f"SELECT {', '.join(select_parts)} FROM {table_name}"

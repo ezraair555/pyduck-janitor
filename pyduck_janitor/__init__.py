@@ -59,10 +59,14 @@ from .cleaning_ops_final import (
     also,
     alias,
     mutate,
+    drop_duplicate_columns,
+    compare_df_cols,
+    join_apply,
+    process_text,
 )
 
-__version__ = "0.1.0"
-__author__ = "Your Name"
+__version__ = "0.1.2"
+__author__ = "EzraAir555"
 __all__ = [
     "DuckJanitor",
     "clean_names",
@@ -112,4 +116,8 @@ __all__ = [
     "also",
     "alias",
     "mutate",
+    "drop_duplicate_columns",
+    "compare_df_cols",
+    "join_apply",
+    "process_text",
 ]

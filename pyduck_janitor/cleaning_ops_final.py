@@ -22,22 +22,35 @@ from .cleaning_ops import _quote_id, _sql_literal, _register_relation
 # ========== Hybrid Layer (Materialize → Python → Re-wrap) ==========
 
 def drop_duplicate_columns(relation: duckdb.DuckDBPyRelation,
-                 conn: Optional[duckdb.DuckDBPyConnection] = None) -> 'DuckJanitor':
+                           conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
     """
     Remove columns that are exact duplicates of other columns.
     """
-    df = relation.df()
+    table_name = _register_relation(conn, relation)
+    cols = relation.columns
+    duplicate_cols = set()
 
-    unique_cols = []
-    seen_hashes = set()
+    for i in range(len(cols)):
+        col1 = cols[i]
+        if col1 in duplicate_cols:
+            continue
+        for j in range(i + 1, len(cols)):
+            col2 = cols[j]
+            if col2 in duplicate_cols:
+                continue
+            # Compare columns for differences
+            query = f"SELECT COUNT(*) FROM {table_name} WHERE {_quote_id(col1)} IS DISTINCT FROM {_quote_id(col2)} LIMIT 1"
+            diff_count = conn.execute(query).fetchone()[0]
+            if diff_count == 0:
+                duplicate_cols.add(col2)
 
-    for col in df.columns:
-        col_hash = hash(tuple(df[col].fillna('__NA__').astype(str)))
-        if col_hash not in seen_hashes:
-            seen_hashes.add(col_hash)
-            unique_cols.append(col)
+    keep_cols = [c for c in cols if c not in duplicate_cols]
+    if not keep_cols:
+        raise ValueError("Cannot remove all columns")
 
-    return DuckJanitor.from_pandas(df[unique_cols])
+    select_parts = [_quote_id(c) for c in keep_cols]
+    query = f"SELECT {', '.join(select_parts)} FROM {table_name}"
+    return conn.query(query)
 
 
 def compare_df_cols(dj1: 'DuckJanitor', dj2: 'DuckJanitor',
@@ -261,25 +274,29 @@ def impute(relation: duckdb.DuckDBPyRelation, column: str,
     if value is not None:
         fill_expr = f"COALESCE({col}, {_sql_literal(value)}) AS {col}"
     else:
+        if group_by:
+            if isinstance(group_by, str):
+                group_by = [group_by]
+            partition = f"PARTITION BY {', '.join(_quote_id(g) for g in group_by)}"
+        else:
+            partition = ""
+
         if statistic == 'mean':
-            stat_subquery = f"SELECT AVG({col}) AS val FROM {table_name}"
+            fill_expr = f"COALESCE({col}, AVG({col}) OVER ({partition})) AS {col}"
         elif statistic == 'median':
-            stat_subquery = (
-                f"SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col}) AS val "
-                f"FROM {table_name}"
-            )
+            fill_expr = f"COALESCE({col}, MEDIAN({col}) OVER ({partition})) AS {col}"
         elif statistic == 'mode':
-            stat_subquery = (
-                f"SELECT {col} AS val FROM {table_name} "
-                f"GROUP BY {col} ORDER BY COUNT(*) DESC LIMIT 1"
-            )
+            fill_expr = f"COALESCE({col}, MODE({col}) OVER ({partition})) AS {col}"
         else:
             raise ValueError(f"Unknown statistic: {statistic}")
 
-        fill_expr = f"COALESCE({col}, ({stat_subquery})) AS {col}"
+    select_parts = []
+    for c in old_columns:
+        if c == column:
+            select_parts.append(fill_expr)
+        else:
+            select_parts.append(_quote_id(c))
 
-    other_cols = [_quote_id(c) for c in old_columns if c != column]
-    select_parts = other_cols + [fill_expr]
     query = f"SELECT {', '.join(select_parts)} FROM {table_name}"
 
     return conn.query(query)
@@ -295,7 +312,8 @@ def jitter(relation: duckdb.DuckDBPyRelation, column: str,
     table_name = _register_relation(conn, relation)
 
     if seed is not None:
-        conn.execute(f"SET seed = {seed}")
+        normalized = (seed % 1000) / 1000.0 if seed != 0 else 0.0
+        conn.execute(f"SELECT setseed({normalized})")
 
     col = _quote_id(column)
     tgt = _quote_id(target_column)
@@ -386,31 +404,43 @@ def count_cumulative_unique(relation: duckdb.DuckDBPyRelation, column: str,
 
 def complete(relation: duckdb.DuckDBPyRelation, columns: Union[str, List[str]],
              fill_value: Any = None,
-                 conn: Optional[duckdb.DuckDBPyConnection] = None) -> 'DuckJanitor':
+                 conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
     """
-    Expand DataFrame to include all possible combinations of key columns.
+    Expand relation to include all possible combinations of specified columns.
     """
-    df = relation.df()
+    table_name = _register_relation(conn, relation)
 
     if isinstance(columns, str):
         columns = [columns]
 
-    import itertools
-
-    unique_values = {}
+    # Build the Cartesian product of unique values for each specified column
+    grid_parts = []
     for col in columns:
-        unique_values[col] = df[col].dropna().unique().tolist()
+        col_quoted = _quote_id(col)
+        grid_parts.append(f"(SELECT DISTINCT {col_quoted} FROM {table_name} WHERE {col_quoted} IS NOT NULL)")
 
-    combinations = list(itertools.product(*[unique_values[col] for col in columns]))
+    grid_query = " CROSS JOIN ".join(grid_parts)
 
-    if combinations:
-        full_df = pd.DataFrame(combinations, columns=columns)
-        result = full_df.merge(df, on=columns, how='left')
+    join_conditions = " AND ".join(f"grid.{_quote_id(col)} = orig.{_quote_id(col)}" for col in columns)
+
+    other_cols = [c for c in relation.columns if c not in columns]
+    if other_cols:
         if fill_value is not None:
-            result = result.fillna(fill_value)
-        return DuckJanitor.from_pandas(result)
+            other_selects = ", ".join(f"COALESCE(orig.{_quote_id(c)}, {_sql_literal(fill_value)}) AS {_quote_id(c)}" for c in other_cols)
+        else:
+            other_selects = ", ".join(f"orig.{_quote_id(c)} AS {_quote_id(c)}" for c in other_cols)
+        select_list = ", ".join(f"grid.{_quote_id(col)}" for col in columns) + ", " + other_selects
     else:
-        return DuckJanitor.from_pandas(df)
+        select_list = ", ".join(f"grid.{_quote_id(col)}" for col in columns)
+
+    query = f"""
+        SELECT {select_list}
+        FROM ({grid_query}) grid
+        LEFT JOIN {table_name} orig
+        ON {join_conditions}
+    """
+
+    return conn.query(query)
 
 
 # ========== DuckJanitor Method Wrappers (Hybrid Layer) ==========
@@ -428,22 +458,31 @@ def also(self: 'DuckJanitor', func: Callable,
     return DuckJanitor.from_pandas(df)
 
 
-def alias(self: 'DuckJanitor', alias: Union[str, Callable],
-                 conn: Optional[duckdb.DuckDBPyConnection] = None) -> 'DuckJanitor':
+def alias(relation: duckdb.DuckDBPyRelation, alias: Union[str, Callable],
+          conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
     """
     Rename all columns using a string or callable.
     """
-    df = self.collect()
+    df_cols = relation.columns
 
     if isinstance(alias, str):
-        new_columns = [alias] * len(df.columns)
+        # Rename all columns to the same base name with unique suffixes if there's more than one
+        new_columns = []
+        for i, col in enumerate(df_cols):
+            if len(df_cols) == 1:
+                new_columns.append(alias)
+            else:
+                new_columns.append(f"{alias}_{i}")
     elif callable(alias):
-        new_columns = [alias(col) for col in df.columns]
+        new_columns = [alias(col) for col in df_cols]
     else:
         raise ValueError("alias must be a string or callable")
 
-    df.columns = new_columns
-    return DuckJanitor.from_pandas(df)
+    # Rename them using SELECT AS
+    select_parts = [f'{_quote_id(old)} AS {_quote_id(new)}' for old, new in zip(df_cols, new_columns)]
+    table_name = _register_relation(conn, relation)
+    query = f"SELECT {', '.join(select_parts)} FROM {table_name}"
+    return conn.query(query)
 
 
 def mutate(self: 'DuckJanitor',

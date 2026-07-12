@@ -283,3 +283,438 @@ class TestDuckJanitor:
         with pytest.raises(ValueError):
             DuckJanitor(rel, connection=duckdb.connect())
 
+    def test_add_column_string_literal(self):
+        """add_column should correctly treat a string scalar as a literal rather than a SQL expression."""
+        df = pd.DataFrame({'A': [1, 2]})
+        result = DuckJanitor.from_pandas(df).add_column('country', 'USA').collect()
+        assert list(result['country']) == ['USA', 'USA']
+
+    def test_filter_column_scalar_comparison(self):
+        """filter_column should correctly fallback to equality comparison for string scalars."""
+        df = pd.DataFrame({'city': ['NYC', 'LA']})
+        result = DuckJanitor.from_pandas(df).filter_column('city', 'NYC').collect()
+        assert list(result['city']) == ['NYC']
+
+    def test_impute_group_by(self):
+        """impute should respect the group_by parameter."""
+        df = pd.DataFrame({'cat': ['A', 'A', 'B', 'B'], 'val': [1.0, None, 10.0, None]})
+        result = DuckJanitor.from_pandas(df).impute('val', statistic='mean', group_by='cat').collect()
+        result = result.sort_values('cat').reset_index(drop=True)
+        # Val for cat A should be imputed with 1.0, cat B with 10.0
+        assert list(result['val']) == pytest.approx([1.0, 1.0, 10.0, 10.0])
+
+    def test_fill_empty_non_string(self):
+        """fill_empty on a non-string column should return the relation as-is without crashing."""
+        df = pd.DataFrame({'A': [1, 2]})
+        result = DuckJanitor.from_pandas(df).fill_empty('A', '0').collect()
+        assert list(result['A']) == [1, 2]
+
+    def test_currency_column_to_numeric_empty_string(self):
+        """currency_column_to_numeric should return NULL for empty/invalid strings instead of crashing."""
+        df = pd.DataFrame({'price': ['', '$', '$10.00']})
+        result = DuckJanitor.from_pandas(df).currency_column_to_numeric('price').collect()
+        assert pd.isna(result['price'].iloc[0])
+        assert pd.isna(result['price'].iloc[1])
+        assert result['price'].iloc[2] == 10.0
+
+    def test_clean_names_arbitrary_duplicates(self):
+        """clean_names should correctly append unique suffixes when 3+ columns map to the same name."""
+        df = pd.DataFrame([[1, 2, 3]], columns=['A!', 'A@', 'A#'])
+        result = DuckJanitor.from_pandas(df).clean_names().collect()
+        assert list(result.columns) == ['a', 'a_dup', 'a_dup_1']
+
+    def test_coalesce_collision(self):
+        """coalesce should replace target column and not duplicate column name if target_column already exists."""
+        df = pd.DataFrame([[1, 2, 3]], columns=['A', 'B', 'C'])
+        result = DuckJanitor.from_pandas(df).coalesce(['A', 'B'], 'C').collect()
+        assert list(result.columns) == ['C']
+        assert result['C'].iloc[0] == 1
+
+    def test_complete_pure_sql(self):
+        """complete should run in pure SQL and produce correct Cartesian combinations."""
+        df = pd.DataFrame({'id': [1, 2], 'cat': ['A', 'B'], 'val': [10, 20]})
+        result = DuckJanitor.from_pandas(df).complete(['id', 'cat'], fill_value=0).collect()
+        assert len(result) == 4
+        # Assert values are filled correctly
+        assert result.loc[(result['id'] == 1) & (result['cat'] == 'B'), 'val'].iloc[0] == 0
+
+    def test_alias_pure_sql(self):
+        """alias should rename all columns using callable or string in pure SQL."""
+        df = pd.DataFrame({'colA': [1], 'colB': [2]})
+        dj = DuckJanitor.from_pandas(df)
+        result1 = dj.alias(lambda x: x.lower().replace('col', 'x_')).collect()
+        assert list(result1.columns) == ['x_a', 'x_b']
+        result2 = dj.alias('new').collect()
+        assert list(result2.columns) == ['new_0', 'new_1']
+
+    def test_drop_duplicate_columns_pure_sql(self):
+        """drop_duplicate_columns should run in pure SQL and drop exact duplicate columns."""
+        df = pd.DataFrame({'A': [1, 2], 'B': [1, 2], 'C': [3, 4]})
+        result = DuckJanitor.from_pandas(df).drop_duplicate_columns().collect()
+        assert list(result.columns) == ['A', 'C']
+
+    def test_compare_df_cols(self):
+        """compare_df_cols should compare column sets correctly."""
+        dj1 = DuckJanitor.from_pandas(pd.DataFrame({'A': [1], 'B': [2]}))
+        dj2 = DuckJanitor.from_pandas(pd.DataFrame({'A': [1], 'C': [3]}))
+        result = dj1.compare_df_cols(dj2)
+        assert len(result) == 1
+        assert ('B', 'BIGINT') in result['only_in_dj1'].iloc[0] or ('B', 'int64') in result['only_in_dj1'].iloc[0]
+        assert ('C', 'BIGINT') in result['only_in_dj2'].iloc[0] or ('C', 'int64') in result['only_in_dj2'].iloc[0]
+
+    def test_join_apply(self):
+        """join_apply should perform a join and apply a Python function row-wise."""
+        dj1 = DuckJanitor.from_pandas(pd.DataFrame({'id': [1], 'val1': [10]}))
+        dj2 = DuckJanitor.from_pandas(pd.DataFrame({'id': [1], 'val2': [20]}))
+        result = dj1.join_apply(dj2, on='id', func=lambda row: row['val1'] + row['val2'], new_column_name='sum').collect()
+        assert result['sum'].iloc[0] == 30
+
+    def test_process_text(self):
+        """process_text should apply string SQL expression or Python callable."""
+        dj = DuckJanitor.from_pandas(pd.DataFrame({'name': ['alice', 'bob']}))
+        result1 = dj.process_text('name', 'upper(name)', 'upper_name').collect()
+        assert list(result1['upper_name']) == ['ALICE', 'BOB']
+        result2 = dj.process_text('name', lambda x: x[::-1], 'rev_name').collect()
+        assert list(result2['rev_name']) == ['ecila', 'bob']
+
+    def test_convert_date_invalid(self):
+        """convert_date should return NULL for unparseable dates instead of crashing."""
+        df = pd.DataFrame({'dt': ['invalid-date', '2023-01-15']})
+        result = DuckJanitor.from_pandas(df).convert_date('dt', 'dt_parsed').collect()
+        assert pd.isna(result['dt_parsed'].iloc[0])
+        assert not pd.isna(result['dt_parsed'].iloc[1])
+
+    def test_from_parquet_and_csv(self, tmp_path):
+        """Test from_parquet and from_csv methods with shared connection."""
+        df = pd.DataFrame({'A': [1, 2, 3], 'B': [4, 5, 6]})
+        
+        csv_file = tmp_path / "test.csv"
+        df.to_csv(csv_file, index=False)
+        
+        parquet_file = tmp_path / "test.parquet"
+        df.to_parquet(parquet_file, index=False)
+        
+        dj_csv = DuckJanitor.from_csv(csv_file)
+        assert len(dj_csv.collect()) == 3
+        
+        dj_pq = DuckJanitor.from_parquet(parquet_file)
+        assert len(dj_pq.collect()) == 3
+
+    def test_bin_numeric(self):
+        """bin_numeric should group numeric values into bins."""
+        df = pd.DataFrame({'A': [1, 2, 3, 4, 5]})
+        # uniform strategy
+        result = DuckJanitor.from_pandas(df).bin_numeric('A', 'A_binned', bins=2, strategy='uniform').collect()
+        assert 'A_binned' in result.columns
+
+        # quantile strategy
+        result2 = DuckJanitor.from_pandas(df).bin_numeric('A', 'A_binned', bins=2, strategy='quantile').collect()
+        assert 'A_binned' in result2.columns
+
+        # custom edges
+        result3 = DuckJanitor.from_pandas(df).bin_numeric('A', 'A_binned', bins=[0, 3, 6]).collect()
+        assert 'A_binned' in result3.columns
+
+    def test_change_type(self):
+        """change_type should convert column types."""
+        df = pd.DataFrame({'A': [1, 2]})
+        result = DuckJanitor.from_pandas(df).change_type('A', 'VARCHAR').collect()
+        assert str(result['A'].dtype) in ('object', 'string', 'str')
+
+    def test_concatenate_columns(self):
+        """concatenate_columns should concatenate specified columns."""
+        df = pd.DataFrame({'A': ['hello'], 'B': ['world']})
+        result = DuckJanitor.from_pandas(df).concatenate_columns(['A', 'B'], sep='-').collect()
+        assert result['concatenated'].iloc[0] == 'hello-world'
+
+    def test_deconcatenate_column(self):
+        """deconcatenate_column should split column values into multiple columns."""
+        df = pd.DataFrame({'A': ['hello-world']})
+        result = DuckJanitor.from_pandas(df).deconcatenate_column('A', '-', ['B', 'C']).collect()
+        assert result['B'].iloc[0] == 'hello'
+        assert result['C'].iloc[0] == 'world'
+
+    def test_drop_constant_columns(self):
+        """drop_constant_columns should drop constant columns."""
+        df = pd.DataFrame({'A': [1, 1, 1], 'B': [1, 2, 3]})
+        result = DuckJanitor.from_pandas(df).drop_constant_columns().collect()
+        assert 'A' not in result.columns
+        assert 'B' in result.columns
+
+    def test_fill_directions(self):
+        """fill should support forward and backward fill directions."""
+        df = pd.DataFrame({'A': [1, None, 3]})
+        # forward
+        result_f = DuckJanitor.from_pandas(df).fill('A', direction='forward').collect()
+        assert list(result_f['A']) == [1.0, 1.0, 3.0]
+        # backward
+        result_b = DuckJanitor.from_pandas(df).fill('A', direction='backward').collect()
+        assert list(result_b['A']) == [1.0, 3.0, 3.0]
+        # value
+        result_v = DuckJanitor.from_pandas(df).fill('A', value=4, direction='value').collect()
+        assert list(result_v['A']) == [1.0, 4.0, 3.0]
+
+    def test_flag_nulls(self):
+        """flag_nulls should flag null columns with a binary indicator."""
+        df = pd.DataFrame({'A': [1, None, 3]})
+        result = DuckJanitor.from_pandas(df).flag_nulls('A').collect()
+        assert 'is_null_A' in result.columns
+        assert list(result['is_null_A']) == [0, 1, 0]
+
+    def test_limit_column_characters(self):
+        """limit_column_characters should limit column characters."""
+        df = pd.DataFrame({'A': ['extremelylongstring']})
+        result = DuckJanitor.from_pandas(df).limit_column_characters('A', 8, suffix='...').collect()
+        assert result['A'].iloc[0] == 'extre...'
+
+    def test_groupby_agg(self):
+        """groupby_agg should support complex grouping and aggregates."""
+        df = pd.DataFrame({'g': ['A', 'A', 'B'], 'v': [10, 20, 30]})
+        result = DuckJanitor.from_pandas(df).groupby_agg('g', {'v': 'sum'}).collect()
+        result = result.sort_values('g').reset_index(drop=True)
+        assert list(result['v_sum']) == [30, 30]
+
+    def test_groupby_topk(self):
+        """groupby_topk should return top k rows in each group."""
+        df = pd.DataFrame({'g': ['A', 'A', 'A', 'B', 'B'], 'v': [1, 2, 3, 10, 20]})
+        result = DuckJanitor.from_pandas(df).groupby_topk('g', 'v', k=2, ascending=False).collect()
+        assert len(result) == 4
+
+    def test_truncate_datetime(self):
+        """truncate_datetime should truncate datetime values."""
+        df = pd.DataFrame({'dt': ['2023-05-15 12:30:45']})
+        dj = DuckJanitor.from_pandas(df).change_type('dt', 'TIMESTAMP')
+        result = dj.truncate_datetime('dt', 'day').collect()
+        assert str(result['dt'].iloc[0]).split()[0] == '2023-05-15'
+
+    def test_pivot_wider_and_longer(self):
+        """pivot_wider and pivot_longer should widen and lengthen datasets."""
+        df = pd.DataFrame({
+            'id': [1, 1, 2, 2],
+            'var': ['A', 'B', 'A', 'B'],
+            'val': [10, 20, 30, 40]
+        })
+        # wider
+        wider = DuckJanitor.from_pandas(df).pivot_wider('id', 'var', 'val').collect()
+        assert 'A' in wider.columns
+        assert 'B' in wider.columns
+        # longer
+        longer = DuckJanitor(DuckJanitor.get_shared_connection().from_df(wider)).pivot_longer(['A', 'B'], names_to='var', values_to='val').collect()
+        assert 'var' in longer.columns
+        assert 'val' in longer.columns
+
+    def test_flag_nulls_errors(self):
+        """flag_nulls should raise ValueError for invalid inputs."""
+        df = pd.DataFrame({'A': [1]})
+        dj = DuckJanitor.from_pandas(df)
+        with pytest.raises(ValueError):
+            dj.change_type('B', 'INT')
+
+    def test_get_dupes(self):
+        """get_dupes should find duplicate rows."""
+        df = pd.DataFrame({'A': [1, 2, 1], 'B': [2, 3, 2]})
+        result = DuckJanitor.from_pandas(df).get_dupes().collect()
+        assert len(result) == 2
+
+    def test_dropnotnull(self):
+        """dropnotnull should drop non-null rows."""
+        df = pd.DataFrame({'A': [1, None, 3]})
+        result = DuckJanitor.from_pandas(df).dropnotnull().collect()
+        assert len(result) == 1
+        assert pd.isna(result['A'].iloc[0])
+
+    def test_expand_column(self):
+        """expand_column should expand delimited columns to dummies."""
+        df = pd.DataFrame({'A': ['x|y', 'x', None]})
+        result = DuckJanitor.from_pandas(df).expand_column('A', sep='|').collect()
+        assert 'A_x' in result.columns
+        assert 'A_y' in result.columns
+
+    def test_jitter(self):
+        """jitter should add random noise to numeric columns."""
+        df = pd.DataFrame({'A': [1.0, 2.0, 3.0]})
+        result = DuckJanitor.from_pandas(df).jitter('A', 'A_jit', scale=0.1, seed=42).collect()
+        assert 'A_jit' in result.columns
+        assert not (result['A'] == result['A_jit']).all()
+
+    def test_label_encode(self):
+        """label_encode should encode categorical columns with integers."""
+        df = pd.DataFrame({'A': ['cat', 'dog', 'cat']})
+        result = DuckJanitor.from_pandas(df).label_encode('A').collect()
+        assert 'A_encoded' in result.columns
+
+    def test_find_replace(self):
+        """find_replace should replace values in columns."""
+        df = pd.DataFrame({'A': ['cat', 'dog']})
+        result = DuckJanitor.from_pandas(df).find_replace('A', {'cat': 'feline', 'dog': 'canine'}).collect()
+        assert list(result['A']) == ['feline', 'canine']
+
+    def test_count_cumulative_unique(self):
+        """count_cumulative_unique should return running count of unique values."""
+        df = pd.DataFrame({'A': ['x', 'y', 'x']})
+        result = DuckJanitor.from_pandas(df).count_cumulative_unique('A').collect()
+        assert 'cumulative_unique' in result.columns
+
+    def test_also_and_mutate(self):
+        """also and mutate should work as convenience wrappers."""
+        df = pd.DataFrame({'A': [1, 2]})
+        dj = DuckJanitor.from_pandas(df)
+        
+        # also
+        side_effect = []
+        def my_side_effect(d):
+            side_effect.append(len(d))
+        dj.also(my_side_effect)
+        assert side_effect == [2]
+
+        # mutate
+        result = dj.mutate(B='A * 10').collect()
+        assert list(result['B']) == [10, 20]
+
+    def test_sql_literal_exceptions_and_edge_cases(self):
+        """Test _sql_literal and _register_relation edge cases/exceptions."""
+        from pyduck_janitor.cleaning_ops import _sql_literal, _register_relation
+        import pytest
+        assert _sql_literal(None) == 'NULL'
+        assert _sql_literal(True) == 'TRUE'
+        assert _sql_literal(False) == 'FALSE'
+        
+        # Test ValueError in _register_relation when conn is None
+        df = pd.DataFrame({'a': [1]})
+        rel = DuckJanitor.get_shared_connection().from_df(df)
+        with pytest.raises(ValueError):
+            _register_relation(None, rel)
+
+    def test_clean_names_upper(self):
+        """clean_names with case_type='upper' should upper-case names."""
+        df = pd.DataFrame({'a_col': [1]})
+        result = DuckJanitor.from_pandas(df).clean_names(case_type='upper').collect()
+        assert list(result.columns) == ['A_COL']
+
+    def test_remove_columns_edge_cases(self):
+        """remove_columns single string and error when removing all."""
+        df = pd.DataFrame({'A': [1], 'B': [2]})
+        # Single string column
+        result = DuckJanitor.from_pandas(df).remove_columns('A').collect()
+        assert list(result.columns) == ['B']
+        # Error when removing all
+        with pytest.raises(ValueError):
+            DuckJanitor.from_pandas(df).remove_columns(['A', 'B']).collect()
+
+    def test_add_column_list_values(self):
+        """add_column when passing list values."""
+        df = pd.DataFrame({'A': [1, 2]})
+        result1 = DuckJanitor.from_pandas(df).add_column('B', [10, 20]).collect()
+        assert list(result1['B']) == [10, 20]
+        # values length shorter than df
+        result2 = DuckJanitor.from_pandas(df).add_column('B', [10], fill_value=99).collect()
+        assert list(result2['B']) == [10, 99]
+
+    def test_rename_column_not_found(self):
+        """rename_column should raise ValueError if column not found."""
+        df = pd.DataFrame({'A': [1]})
+        with pytest.raises(ValueError):
+            DuckJanitor.from_pandas(df).rename_column('B', 'C').collect()
+
+    def test_dropna_subset_single_string_and_invalid_how(self):
+        """dropna single string subset and invalid how value."""
+        df = pd.DataFrame({'A': [1, None], 'B': [3, 4]})
+        result = DuckJanitor.from_pandas(df).dropna(subset='A').collect()
+        assert len(result) == 1
+        with pytest.raises(ValueError):
+            DuckJanitor.from_pandas(df).dropna(how='invalid').collect()
+
+    def test_remove_empty_all_columns_empty(self):
+        """remove_empty should raise ValueError if all columns are empty."""
+        df = pd.DataFrame({'A': [None, None]})
+        with pytest.raises(ValueError):
+            DuckJanitor.from_pandas(df).remove_empty().collect()
+
+    def test_filter_column_callable_no_conn(self):
+        """filter_column with callable and no connection should raise ValueError."""
+        from pyduck_janitor.cleaning_ops import filter_column as _filter_column
+        df = pd.DataFrame({'A': [1]})
+        rel = DuckJanitor.get_shared_connection().from_df(df)
+        with pytest.raises(ValueError):
+            _filter_column(rel, 'A', lambda x: True, conn=None)
+
+    def test_get_dummies_no_prefix(self):
+        """get_dummies should work when prefix is None."""
+        df = pd.DataFrame({'A': ['x', 'y']})
+        result = DuckJanitor.from_pandas(df).get_dummies('A', prefix=None).collect()
+        assert any('A_' in col for col in result.columns)
+
+    def test_select_columns(self):
+        """select_columns should select specific columns (supports string or list)."""
+        df = pd.DataFrame({'A': [1], 'B': [2], 'C': [3]})
+        dj = DuckJanitor.from_pandas(df)
+        assert list(dj.select_columns('A').collect().columns) == ['A']
+        assert list(dj.select_columns(['A', 'C']).collect().columns) == ['A', 'C']
+
+    def test_select_rows_criteria_and_no_args(self):
+        """select_rows with criteria or no arguments."""
+        df = pd.DataFrame({'A': [1, 2, 3]})
+        dj = DuckJanitor.from_pandas(df)
+        assert len(dj.select_rows(indices='A > 1').collect()) == 2
+        assert len(dj.select_rows(criteria='A = 3').collect()) == 1
+        assert len(dj.select_rows().collect()) == 3
+
+    def test_transform_column(self):
+        """transform_column SQL expression and callable."""
+        df = pd.DataFrame({'A': [1, 2]})
+        dj = DuckJanitor.from_pandas(df)
+        assert list(dj.transform_column('A', 'A + 10').collect()['A']) == [11, 12]
+        assert list(dj.transform_column('A', 'A + 10', 'B').collect()['B']) == [11, 12]
+        assert list(dj.transform_column('A', lambda x: x * 2).collect()['A']) == [2, 4]
+
+    def test_transform_columns(self):
+        """transform_columns with single column string or target mapping."""
+        df = pd.DataFrame({'A': [1, 2], 'B': [3, 4]})
+        dj = DuckJanitor.from_pandas(df)
+        result1 = dj.transform_columns('A', 'A + 5').collect()
+        assert list(result1['A']) == [6, 7]
+        result2 = dj.transform_columns(['A', 'B'], 'A + B', ['C', 'D']).collect()
+        assert 'C' in result2.columns
+
+    def test_filter_on_complement(self):
+        """filter_on should support complement parameter."""
+        df = pd.DataFrame({'A': [1, 2, 3]})
+        dj = DuckJanitor.from_pandas(df)
+        assert len(dj.filter_on('A > 1', complement=False).collect()) == 2
+        assert len(dj.filter_on('A > 1', complement=True).collect()) == 1
+
+    def test_filter_string_options(self):
+        """filter_string should support regex, case sensitivity, and complement."""
+        df = pd.DataFrame({'name': ['Alice', 'bob', 'Charlie']})
+        dj = DuckJanitor.from_pandas(df)
+        assert len(dj.filter_string('name', '^A', complement=True, regex=True).collect()) == 2
+        assert len(dj.filter_string('name', 'ice', complement=False, regex=False, case=True).collect()) == 1
+        assert len(dj.filter_string('name', 'alice', complement=False, regex=False, case=False).collect()) == 1
+        assert len(dj.filter_string('name', 'alice', complement=True, regex=False, case=False).collect()) == 2
+
+    def test_constructor_invalid_relation_connection_fallback(self):
+        """Constructor should raise ValueError when connection derivation fails."""
+        import duckdb
+        other_conn = duckdb.connect()
+        rel = other_conn.from_df(pd.DataFrame({'a': [1]}))
+        with pytest.raises(ValueError):
+            DuckJanitor(rel, connection=None)
+
+    def test_from_parquet_list_of_paths(self, tmp_path):
+        """from_parquet should accept a list of paths."""
+        df1 = pd.DataFrame({'A': [1]})
+        df2 = pd.DataFrame({'A': [2]})
+        
+        file1 = tmp_path / "1.parquet"
+        file2 = tmp_path / "2.parquet"
+        df1.to_parquet(file1, index=False)
+        df2.to_parquet(file2, index=False)
+        
+        dj = DuckJanitor.from_parquet([file1, file2])
+        assert len(dj.collect()) == 2
+
+    def test_from_sql(self):
+        """from_sql should initialize DuckJanitor directly from a SQL query."""
+        dj = DuckJanitor.from_sql("SELECT 42 AS answer")
+        assert dj.collect()['answer'].iloc[0] == 42
+

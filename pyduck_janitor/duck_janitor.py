@@ -32,6 +32,14 @@ class DuckJanitor:
     >>> dj = DuckJanitor.from_pandas(df)
     >>> cleaned = dj.dropna().collect()
     """
+    _shared_conn: Optional[duckdb.DuckDBPyConnection] = None
+
+    @classmethod
+    def get_shared_connection(cls) -> duckdb.DuckDBPyConnection:
+        """Get or create the global shared DuckDB connection."""
+        if cls._shared_conn is None:
+            cls._shared_conn = duckdb.connect()
+        return cls._shared_conn
     
     def __init__(self, relation: duckdb.DuckDBPyRelation, connection: Optional[duckdb.DuckDBPyConnection] = None):
         """
@@ -42,12 +50,11 @@ class DuckJanitor:
         relation : duckdb.DuckDBPyRelation
             The DuckDB relation.
         connection : duckdb.DuckDBPyConnection, optional
-            The DuckDB connection that owns the relation. If omitted, an attempt
-            is made to use a fresh connection; this only succeeds for relations
-            that can be registered there (e.g., created by the same process).
+            The DuckDB connection that owns the relation. If omitted, the global
+            shared connection is used.
         """
         if connection is None:
-            connection = duckdb.connect()
+            connection = DuckJanitor.get_shared_connection()
             try:
                 temp_name = f"_validate_{id(relation)}"
                 connection.register(temp_name, relation)
@@ -86,7 +93,7 @@ class DuckJanitor:
         DuckJanitor
             A DuckJanitor instance.
         """
-        conn = duckdb.connect()
+        conn = cls.get_shared_connection()
         relation = conn.from_df(df)
         return cls(relation, connection=conn)
     
@@ -111,7 +118,7 @@ class DuckJanitor:
         >>> dj = DuckJanitor.from_parquet(['part1.parquet', 'part2.parquet'])
         >>> dj = DuckJanitor.from_parquet('s3://bucket/data.parquet')
         """
-        conn = duckdb.connect()
+        conn = cls.get_shared_connection()
 
         if isinstance(path, list):
             path_list = [str(p) for p in path]
@@ -140,7 +147,7 @@ class DuckJanitor:
         DuckJanitor
             A DuckJanitor instance.
         """
-        conn = duckdb.connect()
+        conn = cls.get_shared_connection()
         relation = conn.read_csv(str(path), **kwargs)
         return cls(relation, connection=conn)
     
@@ -161,7 +168,7 @@ class DuckJanitor:
         DuckJanitor
             A DuckJanitor instance.
         """
-        conn = connection or duckdb.connect()
+        conn = connection or cls.get_shared_connection()
         relation = conn.query(query)
         return cls(relation, connection=conn)
     
@@ -585,6 +592,12 @@ class DuckJanitor:
         new_relation = _conditional_join(self._relation, other._relation, on, how, self._connection)
         return DuckJanitor(new_relation, self._connection)
     
+    def get_dupes(self, columns: Optional[Union[str, List[str]]] = None) -> 'DuckJanitor':
+        """Return duplicate rows."""
+        from .cleaning_ops_final import get_dupes as _get_dupes
+        new_relation = _get_dupes(self._relation, columns, self._connection)
+        return DuckJanitor(new_relation, self._connection)
+
     def dropnotnull(self, subset: Optional[Union[str, List[str]]] = None,
                     how: str = 'any') -> 'DuckJanitor':
         """Remove rows where values are NOT null (keep nulls)."""
@@ -637,10 +650,10 @@ class DuckJanitor:
     
     def complete(self, columns: Union[str, List[str]],
                  fill_value: Any = None) -> 'DuckJanitor':
-        """Expand DataFrame to include all possible combinations."""
+        """Expand relation to include all possible combinations of specified columns."""
         from .cleaning_ops_final import complete as _complete
-        result = _complete(self._relation, columns, fill_value, self._connection)
-        return result
+        new_relation = _complete(self._relation, columns, fill_value, self._connection)
+        return DuckJanitor(new_relation, self._connection)
     
     def also(self, func: Callable) -> 'DuckJanitor':
         """Apply a Python function with side effects (materializes data)."""
@@ -649,10 +662,33 @@ class DuckJanitor:
         return result
     
     def alias(self, alias: Union[str, Callable]) -> 'DuckJanitor':
-        """Rename all columns using a string or callable (materializes data)."""
+        """Rename all columns using a string or callable."""
         from .cleaning_ops_final import alias as _alias
-        result = _alias(self, alias)
-        return result
+        new_relation = _alias(self._relation, alias, self._connection)
+        return DuckJanitor(new_relation, self._connection)
+
+    def drop_duplicate_columns(self) -> 'DuckJanitor':
+        """Remove columns that are exact duplicates of other columns."""
+        from .cleaning_ops_final import drop_duplicate_columns as _drop_duplicate_columns
+        new_relation = _drop_duplicate_columns(self._relation, self._connection)
+        return DuckJanitor(new_relation, self._connection)
+
+    def compare_df_cols(self, other: 'DuckJanitor') -> pd.DataFrame:
+        """Compare columns between two DuckJanitor instances."""
+        from .cleaning_ops_final import compare_df_cols as _compare_df_cols
+        return _compare_df_cols(self, other, self._connection)
+
+    def join_apply(self, other: 'DuckJanitor', on: Union[str, List[str]],
+                   func: Callable, new_column_name: str) -> 'DuckJanitor':
+        """Perform join then apply Python function to each row."""
+        from .cleaning_ops_final import join_apply as _join_apply
+        return _join_apply(self, other, on, func, new_column_name, self._connection)
+
+    def process_text(self, column: str, func: Union[Callable, str],
+                     new_column_name: str) -> 'DuckJanitor':
+        """Apply text processing function to a column."""
+        from .cleaning_ops_final import process_text as _process_text
+        return _process_text(self, column, func, new_column_name, self._connection)
     
     def mutate(self, **kwargs) -> 'DuckJanitor':
         """Create or modify columns using a dictionary (convenience wrapper)."""

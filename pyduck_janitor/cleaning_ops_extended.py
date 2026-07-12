@@ -26,7 +26,11 @@ def bin_numeric(relation: duckdb.DuckDBPyRelation, column: str,
             bin_expr = f"NTILE({bins}) OVER (ORDER BY {col}) AS {tgt}"
         elif strategy == 'uniform':
             bin_expr = (
-                f"WIDTH_BUCKET({col}, MIN({col}) OVER (), MAX({col}) OVER (), {bins}) AS {tgt}"
+                f"CASE "
+                f"WHEN {col} = MAX({col}) OVER () THEN {bins} "
+                f"WHEN MAX({col}) OVER () - MIN({col}) OVER () = 0 THEN 1 "
+                f"ELSE FLOOR(({col} - MIN({col}) OVER ()) / (MAX({col}) OVER () - MIN({col}) OVER ()) * {bins})::INT + 1 "
+                f"END AS {tgt}"
             )
         else:
             raise ValueError(f"Unknown strategy: {strategy}")
@@ -180,25 +184,41 @@ def fill(relation: duckdb.DuckDBPyRelation, column: str,
         else:
             partition = ""
 
+        # Use a CTE to generate row index for ordering to avoid parser error on nested window functions
+        numbered_table = f"temp_numbered_{id(relation)}"
+        
         if direction == 'forward':
             fill_expr = (
                 f"COALESCE({col}, "
                 f"LAST_VALUE({col} IGNORE NULLS) OVER ("
-                f"{partition} ORDER BY ROW_NUMBER() OVER () "
+                f"{partition} ORDER BY _row_idx "
                 f"ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)) AS {col}"
             )
         else:
             fill_expr = (
                 f"COALESCE({col}, "
                 f"FIRST_VALUE({col} IGNORE NULLS) OVER ("
-                f"{partition} ORDER BY ROW_NUMBER() OVER () "
+                f"{partition} ORDER BY _row_idx "
                 f"ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)) AS {col}"
             )
+
+        with_clause = f"WITH {numbered_table} AS (SELECT *, ROW_NUMBER() OVER () AS _row_idx FROM {table_name})"
+        other_cols = [_quote_id(c) for c in old_columns if c != column]
+        if other_cols:
+            select_list = ', '.join(other_cols) + f", {fill_expr}"
+        else:
+            select_list = fill_expr
+        query = f"{with_clause} SELECT {select_list} FROM {numbered_table}"
+        return conn.query(query)
     else:
         raise ValueError(f"Unknown direction: {direction}")
 
     other_cols = [_quote_id(c) for c in old_columns if c != column]
-    query = f"SELECT {', '.join(other_cols)}, {fill_expr} FROM {table_name}"
+    if other_cols:
+        select_list = ', '.join(other_cols) + f", {fill_expr}"
+    else:
+        select_list = fill_expr
+    query = f"SELECT {select_list} FROM {table_name}"
 
     return conn.query(query)
 
@@ -214,6 +234,13 @@ def fill_empty(relation: duckdb.DuckDBPyRelation, column: str,
 
     if column not in old_columns:
         raise ValueError(f"Column '{column}' not found")
+
+    # Check data type of the column. Empty strings only apply to string types.
+    col_idx = old_columns.index(column)
+    col_type = str(relation.dtypes[col_idx]).upper()
+    string_types = {'VARCHAR', 'TEXT', 'CHAR', 'STRING', 'BLOB'}
+    if not any(st in col_type for st in string_types):
+        return relation
 
     col = _quote_id(column)
     select_parts = []
@@ -408,7 +435,7 @@ def currency_column_to_numeric(relation: duckdb.DuckDBPyRelation, column: str,
     tgt = _quote_id(target_column)
 
     clean_expr = (
-        f"CAST(regexp_replace(CAST({col} AS VARCHAR), '[^0-9.-]', '', 'g') AS DOUBLE) AS {tgt}"
+        f"TRY_CAST(NULLIF(regexp_replace(CAST({col} AS VARCHAR), '[^0-9.-]', '', 'g'), '') AS DOUBLE) AS {tgt}"
     )
 
     select_parts = [_quote_id(c) for c in old_columns if c != column]
@@ -439,9 +466,9 @@ def convert_date(relation: duckdb.DuckDBPyRelation, column: str,
     tgt = _quote_id(target_column)
 
     if date_format:
-        convert_expr = f"strptime({col}, {_sql_literal(date_format)}) AS {tgt}"
+        convert_expr = f"try_strptime({col}, {_sql_literal(date_format)}) AS {tgt}"
     else:
-        convert_expr = f"CAST({col} AS DATE) AS {tgt}"
+        convert_expr = f"TRY_CAST({col} AS DATE) AS {tgt}"
 
     select_parts = [_quote_id(c) for c in old_columns if c != column]
     select_parts.append(convert_expr)
