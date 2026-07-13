@@ -274,6 +274,20 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 ## Changelog
 
+### 0.1.2 — Production-ready stabilization, pure SQL rewrites, and test expansion
+
+- **Pure SQL Rewrites**: Rewrote `alias`, `complete`, and `drop_duplicate_columns` in 100% pure, out-of-core SQL to avoid in-memory materialization to Pandas.
+- **API Expositions**: Exposed previously hidden hybrid and final functions (`drop_duplicate_columns`, `compare_df_cols`, `join_apply`, `process_text`, and `get_dupes`) directly as wrapper methods on `DuckJanitor`.
+- **Bug Fixes**:
+  - Fixed syntax parser errors in `fill` by introducing physical row number index CTEs instead of nesting window functions.
+  - Added safe string literal quoting fallback to `add_column` and `filter_column` when passing raw string scalars.
+  - Resolved name-collision bugs in `clean_names` and `coalesce`.
+  - Implemented group-by partitioning support in `impute` using SQL window functions.
+  - Ensured operations like `fill_empty`, `currency_column_to_numeric`, and `convert_date` gracefully return NULLs instead of crashing.
+- **Metadata Update**: Updated package version to `0.1.2` and author information.
+- **Unit Test Suite**: Added 54 new test cases covering all edge cases, raising code coverage from **44% to 93%** (with 100% coverage on `duck_janitor.py`).
+- **Logo Sticker**: Added a custom package logo sticker of a duck dressed as a janitor.
+
 ### 0.1.1 — Connection handling and crash fixes
 
 - Fixed cross-connection crashes across `cleaning_ops.py`,
