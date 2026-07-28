@@ -46,3 +46,9 @@ Repository = "https://github.com/yourusername/pyduck-janitor"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["pyduck_janitor*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra --strict-markers"
+
