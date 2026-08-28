@@ -193,6 +193,16 @@ Mix janitor methods with custom SQL:
 result = df.sql('SELECT * FROM self WHERE age > 18').collect()
 ```
 
+### SQL Fragment Safety (0.1.3)
+
+For methods that accept SQL fragments (for example `filter_on`, `filter_column`, `select_rows(criteria=...)`, `transform_column(func=...)`, `case_when`, and `change_type`), `pyduck-janitor` now rejects:
+
+- Multi-statement fragments containing `;`
+- SQL comments (`--`, `/* ... */`)
+- Destructive DDL/DML keywords (`DROP`, `DELETE`, `UPDATE`, `INSERT`, etc.)
+
+This keeps expression-based APIs usable while reducing accidental or unsafe query fragments.
+
 ## API Comparison
 
 ### Traditional pandas + pyjanitor
@@ -274,6 +284,14 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 ## Changelog
 
+### 0.1.3 — Validation hardening, audit documentation, and test expansion
+
+- Added a full package audit report in `CODE_REVIEW.md`.
+- Added stronger validation for SQL-fragment inputs and missing-column errors across cleaning modules.
+- Added expanded edge-case and error-path tests in `tests/test_validation_and_edges.py`.
+- Improved `join_apply` cross-connection handling and `DuckJanitor.sql()` identifier replacement behavior.
+- Bumped package version to `0.1.3`.
+
 ### 0.1.2 — Production-ready stabilization, pure SQL rewrites, and test expansion
 
 - **Pure SQL Rewrites**: Rewrote `alias`, `complete`, and `drop_duplicate_columns` in 100% pure, out-of-core SQL to avoid in-memory materialization to Pandas.
@@ -316,6 +334,8 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 - DuckDB-backed pyjanitor-style cleaning API with 51 functions.
 - Lazy SQL evaluation for simple operations; hybrid SQL/Python for
   complex operations.
+
+For a complete release history, see [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

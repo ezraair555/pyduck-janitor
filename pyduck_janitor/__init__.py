@@ -41,7 +41,6 @@ from .cleaning_ops_extended import (
     currency_column_to_numeric,
     convert_date,
     truncate_datetime,
-    truncate_datetime,
     pivot_wider,
     pivot_longer,
 )
@@ -65,7 +64,7 @@ from .cleaning_ops_final import (
     process_text,
 )
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 __author__ = "EzraAir555"
 __all__ = [
     "DuckJanitor",

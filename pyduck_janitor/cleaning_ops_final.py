@@ -13,10 +13,15 @@ This module adds the final SQL-based transformations including:
 import duckdb
 import pandas as pd
 from typing import Optional, Union, List, Any, Dict, Callable
-import re
 
 from .duck_janitor import DuckJanitor
-from .cleaning_ops import _quote_id, _sql_literal, _register_relation
+from .cleaning_ops import (
+    _quote_id,
+    _sql_literal,
+    _register_relation,
+    _ensure_columns_exist,
+    _validate_sql_fragment,
+)
 
 
 # ========== Hybrid Layer (Materialize → Python → Re-wrap) ==========
@@ -81,11 +86,22 @@ def join_apply(self: 'DuckJanitor', other: 'DuckJanitor', on: Union[str, List[st
     """
     if isinstance(on, str):
         on = [on]
+    if not on:
+        raise ValueError("on must contain at least one join column")
+    _ensure_columns_exist(self._relation.columns, on)
+    _ensure_columns_exist(other._relation.columns, on)
+    if not callable(func):
+        raise ValueError("func must be callable")
+    if not isinstance(new_column_name, str) or not new_column_name.strip():
+        raise ValueError("new_column_name must be a non-empty string")
 
     temp_self = f"_self_{id(self._relation)}"
     temp_other = f"_other_{id(other._relation)}"
     self._connection.register(temp_self, self._relation)
-    self._connection.register(temp_other, other._relation)
+    try:
+        self._connection.register(temp_other, other._relation)
+    except Exception:
+        self._connection.register(temp_other, other._relation.df())
 
     join_conditions = ' AND '.join(f'self.{_quote_id(col)} = other.{_quote_id(col)}' for col in on)
 
@@ -109,7 +125,11 @@ def process_text(self: 'DuckJanitor', column: str, func: Union[Callable, str],
     """
     Apply text processing function to a column.
     """
+    _ensure_columns_exist(self._relation.columns, [column])
+    if not isinstance(new_column_name, str) or not new_column_name.strip():
+        raise ValueError("new_column_name must be a non-empty string")
     if isinstance(func, str):
+        _validate_sql_fragment(func, context="Text-processing SQL expression")
         return self.add_column(new_column_name, func)
     elif callable(func):
         df = self.collect()
@@ -138,15 +158,23 @@ def conditional_join(relation: duckdb.DuckDBPyRelation, other_relation: duckdb.D
             "Pass the connection that owns the left relation."
         )
 
+    valid_join_types = {"inner", "left", "right", "full", "cross"}
+    if how.lower() not in valid_join_types:
+        raise ValueError(f"how must be one of {sorted(valid_join_types)}")
+    if not on and how.lower() != "cross":
+        raise ValueError("on must contain at least one (left_col, right_col, op) tuple.")
+
     conditions = []
     for left_col, right_col, op in on:
+        _ensure_columns_exist(relation.columns, [left_col])
+        _ensure_columns_exist(other_relation.columns, [right_col])
         if op not in _VALID_CONDITIONAL_OPS:
             raise ValueError(f"Invalid operator: {op!r}. Use one of {_VALID_CONDITIONAL_OPS}")
         conditions.append(
             f'self.{_quote_id(left_col)} {op} other.{_quote_id(right_col)}'
         )
 
-    where_clause = ' AND '.join(conditions)
+    where_clause = ' AND '.join(conditions) if conditions else "TRUE"
 
     temp_self = f"_self_{id(relation)}"
     temp_other = f"_other_{id(other_relation)}"
@@ -178,6 +206,9 @@ def get_dupes(relation: duckdb.DuckDBPyRelation,
         columns = relation.columns
     elif isinstance(columns, str):
         columns = [columns]
+    if not columns:
+        raise ValueError("columns must contain at least one column")
+    _ensure_columns_exist(relation.columns, columns)
 
     partition_cols = ', '.join(_quote_id(c) for c in columns)
 
@@ -206,6 +237,9 @@ def dropnotnull(relation: duckdb.DuckDBPyRelation,
         subset = relation.columns
     elif isinstance(subset, str):
         subset = [subset]
+    if not subset:
+        raise ValueError("subset must contain at least one column")
+    _ensure_columns_exist(relation.columns, subset)
 
     if how == 'any':
         conditions = [f'{_quote_id(col)} IS NULL' for col in subset]
@@ -226,6 +260,7 @@ def expand_column(relation: duckdb.DuckDBPyRelation, column: str,
     Expand a delimited column into dummy variables.
     """
     table_name = _register_relation(conn, relation)
+    _ensure_columns_exist(relation.columns, [column])
 
     if prefix is None:
         prefix = column
@@ -266,8 +301,7 @@ def impute(relation: duckdb.DuckDBPyRelation, column: str,
     table_name = _register_relation(conn, relation)
     old_columns = relation.columns
 
-    if column not in old_columns:
-        raise ValueError(f"Column '{column}' not found")
+    _ensure_columns_exist(old_columns, [column])
 
     col = _quote_id(column)
 
@@ -277,6 +311,7 @@ def impute(relation: duckdb.DuckDBPyRelation, column: str,
         if group_by:
             if isinstance(group_by, str):
                 group_by = [group_by]
+            _ensure_columns_exist(old_columns, group_by)
             partition = f"PARTITION BY {', '.join(_quote_id(g) for g in group_by)}"
         else:
             partition = ""
@@ -310,6 +345,9 @@ def jitter(relation: duckdb.DuckDBPyRelation, column: str,
     Add random noise (jitter) to a numeric column.
     """
     table_name = _register_relation(conn, relation)
+    _ensure_columns_exist(relation.columns, [column])
+    if scale < 0:
+        raise ValueError("scale must be >= 0")
 
     if seed is not None:
         normalized = (seed % 1000) / 1000.0 if seed != 0 else 0.0
@@ -336,22 +374,24 @@ def label_encode(relation: duckdb.DuckDBPyRelation, columns: Union[str, List[str
 
     if isinstance(columns, str):
         columns = [columns]
+    if not columns:
+        raise ValueError("columns must contain at least one column")
+    _ensure_columns_exist(relation.columns, columns)
 
     select_parts = [_quote_id(c) for c in relation.columns]
 
     for col in columns:
-        if col in relation.columns:
-            encoded_col = f"{col}{suffix}"
-            encode_expr = (
-                f"DENSE_RANK() OVER (ORDER BY {_quote_id(col)}) - 1 AS {_quote_id(encoded_col)}"
-            )
-            select_parts.append(encode_expr)
+        encoded_col = f"{col}{suffix}"
+        encode_expr = (
+            f"DENSE_RANK() OVER (ORDER BY {_quote_id(col)}) - 1 AS {_quote_id(encoded_col)}"
+        )
+        select_parts.append(encode_expr)
 
     return conn.query(f"SELECT {', '.join(select_parts)} FROM {table_name}")
 
 
 def find_replace(relation: duckdb.DuckDBPyRelation, column: str,
-                 value_pairs: Dict[str, str],
+                 value_pairs: Dict[Any, Any],
                  target_column: Optional[str] = None,
                  conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
     """
@@ -360,8 +400,9 @@ def find_replace(relation: duckdb.DuckDBPyRelation, column: str,
     table_name = _register_relation(conn, relation)
     old_columns = relation.columns
 
-    if column not in old_columns:
-        raise ValueError(f"Column '{column}' not found")
+    _ensure_columns_exist(old_columns, [column])
+    if not value_pairs:
+        raise ValueError("value_pairs cannot be empty")
 
     if target_column is None:
         target_column = column
@@ -388,6 +429,7 @@ def count_cumulative_unique(relation: duckdb.DuckDBPyRelation, column: str,
     Return a column with the cumulative count of unique values.
     """
     table_name = _register_relation(conn, relation)
+    _ensure_columns_exist(relation.columns, [column])
     col = _quote_id(column)
     dest = _quote_id(dest_column)
 
@@ -412,6 +454,9 @@ def complete(relation: duckdb.DuckDBPyRelation, columns: Union[str, List[str]],
 
     if isinstance(columns, str):
         columns = [columns]
+    if not columns:
+        raise ValueError("columns must contain at least one column")
+    _ensure_columns_exist(relation.columns, columns)
 
     # Build the Cartesian product of unique values for each specified column
     grid_parts = []
@@ -466,6 +511,8 @@ def alias(relation: duckdb.DuckDBPyRelation, alias: Union[str, Callable],
     df_cols = relation.columns
 
     if isinstance(alias, str):
+        if not alias.strip():
+            raise ValueError("alias must be a non-empty string")
         # Rename all columns to the same base name with unique suffixes if there's more than one
         new_columns = []
         for i, col in enumerate(df_cols):
@@ -475,6 +522,8 @@ def alias(relation: duckdb.DuckDBPyRelation, alias: Union[str, Callable],
                 new_columns.append(f"{alias}_{i}")
     elif callable(alias):
         new_columns = [alias(col) for col in df_cols]
+        if not all(isinstance(name, str) and name.strip() for name in new_columns):
+            raise ValueError("Callable alias must return non-empty string names for all columns.")
     else:
         raise ValueError("alias must be a string or callable")
 

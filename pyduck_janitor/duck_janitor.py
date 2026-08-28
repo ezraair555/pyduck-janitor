@@ -9,6 +9,7 @@ import pandas as pd
 import duckdb
 from typing import Optional, Union, List, Dict, Any, Callable
 from pathlib import Path
+import re
 
 
 class DuckJanitor:
@@ -41,7 +42,7 @@ class DuckJanitor:
             cls._shared_conn = duckdb.connect()
         return cls._shared_conn
     
-    def __init__(self, relation: duckdb.DuckDBPyRelation, connection: Optional[duckdb.DuckDBPyConnection] = None):
+    def __init__(self, relation: duckdb.DuckDBPyRelation, connection: Optional[duckdb.DuckDBPyConnection] = None) -> None:
         """
         Initialize DuckJanitor with a DuckDB relation.
         
@@ -131,7 +132,7 @@ class DuckJanitor:
         return cls(relation, connection=conn)
     
     @classmethod
-    def from_csv(cls, path: Union[str, Path], **kwargs) -> 'DuckJanitor':
+    def from_csv(cls, path: Union[str, Path], **kwargs: Any) -> 'DuckJanitor':
         """
         Create a DuckJanitor from a CSV file.
         
@@ -201,6 +202,8 @@ class DuckJanitor:
         pd.DataFrame
             The first n rows.
         """
+        if n < 0:
+            raise ValueError("n must be >= 0")
         return self._relation.limit(n).df()
     
     def clean_names(self, strip_underscores: bool = True, case_type: str = 'lower', 
@@ -470,7 +473,7 @@ class DuckJanitor:
         # Register the current relation as a temporary table
         temp_name = f"_temp_{id(self._relation)}"
         self._connection.register(temp_name, self._relation)
-        query = query.replace('self', temp_name)
+        query = re.sub(r"\bself\b", temp_name, query)
         new_relation = self._connection.query(query)
         return DuckJanitor(new_relation, self._connection)
     
@@ -690,7 +693,7 @@ class DuckJanitor:
         from .cleaning_ops_final import process_text as _process_text
         return _process_text(self, column, func, new_column_name, self._connection)
     
-    def mutate(self, **kwargs) -> 'DuckJanitor':
+    def mutate(self, **kwargs: Any) -> 'DuckJanitor':
         """Create or modify columns using a dictionary (convenience wrapper)."""
         from .cleaning_ops_final import mutate as _mutate
         result = _mutate(self, **kwargs)

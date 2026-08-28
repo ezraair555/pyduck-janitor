@@ -6,9 +6,14 @@ This module extends cleaning_ops.py with more SQL-based transformations.
 
 import duckdb
 from typing import Optional, Union, List, Any, Dict
-import re
 
-from .cleaning_ops import _quote_id, _sql_literal, _register_relation
+from .cleaning_ops import (
+    _quote_id,
+    _sql_literal,
+    _register_relation,
+    _ensure_columns_exist,
+    _validate_sql_fragment,
+)
 
 
 def bin_numeric(relation: duckdb.DuckDBPyRelation, column: str,
@@ -18,10 +23,13 @@ def bin_numeric(relation: duckdb.DuckDBPyRelation, column: str,
     Bin a numeric column into discrete intervals.
     """
     table_name = _register_relation(conn, relation)
+    _ensure_columns_exist(relation.columns, [column])
     col = _quote_id(column)
     tgt = _quote_id(target_column)
 
     if isinstance(bins, int):
+        if bins < 1:
+            raise ValueError("bins must be >= 1 when provided as an integer")
         if strategy == 'quantile':
             bin_expr = f"NTILE({bins}) OVER (ORDER BY {col}) AS {tgt}"
         elif strategy == 'uniform':
@@ -38,6 +46,8 @@ def bin_numeric(relation: duckdb.DuckDBPyRelation, column: str,
         query = f"SELECT *, {bin_expr} FROM {table_name}"
     else:
         edges = sorted(bins)
+        if len(edges) < 2:
+            raise ValueError("bins must contain at least two edge values")
         case_parts = []
         for i in range(len(edges) - 1):
             if i == 0:
@@ -71,8 +81,8 @@ def change_type(relation: duckdb.DuckDBPyRelation, column: str,
     table_name = _register_relation(conn, relation)
     old_columns = relation.columns
 
-    if column not in old_columns:
-        raise ValueError(f"Column '{column}' not found")
+    _ensure_columns_exist(old_columns, [column])
+    _validate_sql_fragment(dtype, context="dtype")
 
     col = _quote_id(column)
     select_parts = []
@@ -94,6 +104,9 @@ def concatenate_columns(relation: duckdb.DuckDBPyRelation, columns: List[str],
     Concatenate multiple columns into a single column.
     """
     table_name = _register_relation(conn, relation)
+    if not columns:
+        raise ValueError("columns must contain at least one column")
+    _ensure_columns_exist(relation.columns, columns)
 
     concat_parts = []
     for i, col in enumerate(columns):
@@ -117,8 +130,9 @@ def deconcatenate_column(relation: duckdb.DuckDBPyRelation, column: str,
     table_name = _register_relation(conn, relation)
     old_columns = relation.columns
 
-    if column not in old_columns:
-        raise ValueError(f"Column '{column}' not found")
+    _ensure_columns_exist(old_columns, [column])
+    if not target_columns:
+        raise ValueError("target_columns must contain at least one column")
 
     col = _quote_id(column)
     select_parts = [_quote_id(c) for c in old_columns if c != column]
@@ -167,8 +181,7 @@ def fill(relation: duckdb.DuckDBPyRelation, column: str,
     table_name = _register_relation(conn, relation)
     old_columns = relation.columns
 
-    if column not in old_columns:
-        raise ValueError(f"Column '{column}' not found")
+    _ensure_columns_exist(old_columns, [column])
 
     col = _quote_id(column)
 
@@ -271,6 +284,7 @@ def flag_nulls(relation: duckdb.DuckDBPyRelation, columns: Optional[Union[str, L
         columns = old_columns
     elif isinstance(columns, str):
         columns = [columns]
+    _ensure_columns_exist(old_columns, columns)
 
     select_parts = [_quote_id(c) for c in old_columns]
 
@@ -298,6 +312,8 @@ def limit_column_characters(relation: duckdb.DuckDBPyRelation, column: str,
 
     if column not in old_columns:
         raise ValueError(f"Column '{column}' not found")
+    if max_chars < 0:
+        raise ValueError("max_chars must be >= 0")
 
     col = _quote_id(column)
     safe_suffix = _sql_literal(suffix)
@@ -326,6 +342,7 @@ def min_max_scale(relation: duckdb.DuckDBPyRelation, column: str,
     Apply Min-Max scaling to a numeric column.
     """
     table_name = _register_relation(conn, relation)
+    _ensure_columns_exist(relation.columns, [column])
     col = _quote_id(column)
     tgt = _quote_id(target_column)
 
@@ -351,13 +368,21 @@ def groupby_agg(relation: duckdb.DuckDBPyRelation, by: Union[str, List[str]],
 
     if isinstance(by, str):
         by = [by]
+    if not by:
+        raise ValueError("by must contain at least one grouping column")
+    _ensure_columns_exist(relation.columns, by)
+    if not aggregations:
+        raise ValueError("aggregations cannot be empty")
 
     agg_parts = []
     for col, agg in aggregations.items():
+        _ensure_columns_exist(relation.columns, [col])
         if isinstance(agg, str):
+            _validate_sql_fragment(agg, context=f"Aggregation function for column '{col}'")
             agg_parts.append(f"{agg.upper()}({_quote_id(col)}) AS {_quote_id(f'{col}_{agg}')}")
         elif isinstance(agg, dict):
             for new_name, func in agg.items():
+                _validate_sql_fragment(func, context=f"Aggregation function for column '{col}'")
                 agg_parts.append(f"{func.upper()}({_quote_id(col)}) AS {_quote_id(new_name)}")
 
     group_cols = ', '.join(_quote_id(g) for g in by)
@@ -376,6 +401,11 @@ def groupby_topk(relation: duckdb.DuckDBPyRelation, by: Union[str, List[str]],
 
     if isinstance(by, str):
         by = [by]
+    if not by:
+        raise ValueError("by must contain at least one grouping column")
+    _ensure_columns_exist(relation.columns, by + [column])
+    if k < 1:
+        raise ValueError("k must be >= 1")
 
     order = 'ASC' if ascending else 'DESC'
     partition = ', '.join(_quote_id(g) for g in by)
@@ -400,8 +430,11 @@ def case_when(relation: duckdb.DuckDBPyRelation, conditions: List[tuple],
     table_name = _register_relation(conn, relation)
 
     case_parts = []
+    if not conditions:
+        raise ValueError("conditions must contain at least one condition/value pair")
     for condition, value in conditions:
         if isinstance(condition, str):
+            _validate_sql_fragment(condition, context="CASE WHEN condition")
             case_parts.append(f"WHEN {condition} THEN {_sql_literal(value)}")
         elif callable(condition):
             raise ValueError("Callable conditions require materialization. Use SQL strings instead.")
@@ -425,8 +458,7 @@ def currency_column_to_numeric(relation: duckdb.DuckDBPyRelation, column: str,
     table_name = _register_relation(conn, relation)
     old_columns = relation.columns
 
-    if column not in old_columns:
-        raise ValueError(f"Column '{column}' not found")
+    _ensure_columns_exist(old_columns, [column])
 
     if target_column is None:
         target_column = column
@@ -456,8 +488,7 @@ def convert_date(relation: duckdb.DuckDBPyRelation, column: str,
     table_name = _register_relation(conn, relation)
     old_columns = relation.columns
 
-    if column not in old_columns:
-        raise ValueError(f"Column '{column}' not found")
+    _ensure_columns_exist(old_columns, [column])
 
     if target_column is None:
         target_column = column
@@ -490,9 +521,12 @@ def pivot_wider(relation: duckdb.DuckDBPyRelation,
 
     if isinstance(id_cols, str):
         id_cols = [id_cols]
+    _ensure_columns_exist(relation.columns, id_cols + [name_col, value_col])
 
     name_query = f"SELECT DISTINCT {_quote_id(name_col)} FROM {table_name}"
-    name_values = [row[0] for row in conn.execute(name_query).fetchall()]
+    name_values = [row[0] for row in conn.execute(name_query).fetchall() if row[0] is not None]
+    if not name_values:
+        raise ValueError("name_col contains no non-null values to pivot.")
 
     pivot_cols = []
     for val in name_values:
@@ -520,13 +554,15 @@ def pivot_longer(relation: duckdb.DuckDBPyRelation,
 
     if isinstance(cols, str):
         cols = [cols]
+    if not cols:
+        raise ValueError("cols must contain at least one column")
+    _ensure_columns_exist(relation.columns, cols)
 
     old_columns = relation.columns
     id_cols = [col for col in old_columns if col not in cols]
 
     parts = []
     for col in cols:
-        escaped_col = col.replace("'", "''")
         if id_cols:
             id_select = ', '.join(_quote_id(c) for c in id_cols)
             parts.append(
@@ -553,6 +589,7 @@ def truncate_datetime(relation: duckdb.DuckDBPyRelation, column: str,
     """
     table_name = _register_relation(conn, relation)
     old_columns = relation.columns
+    _ensure_columns_exist(old_columns, [column])
 
     if target_column is None:
         target_column = column
