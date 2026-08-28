@@ -22,6 +22,8 @@ def bin_numeric(relation: duckdb.DuckDBPyRelation, column: str,
     """
     Bin a numeric column into discrete intervals.
     """
+    if not isinstance(target_column, str) or not target_column.strip():
+        raise ValueError("target_column must be a non-empty string")
     table_name = _register_relation(conn, relation)
     _ensure_columns_exist(relation.columns, [column])
     col = _quote_id(column)
@@ -341,6 +343,8 @@ def min_max_scale(relation: duckdb.DuckDBPyRelation, column: str,
     """
     Apply Min-Max scaling to a numeric column.
     """
+    if not isinstance(target_column, str) or not target_column.strip():
+        raise ValueError("target_column must be a non-empty string")
     table_name = _register_relation(conn, relation)
     _ensure_columns_exist(relation.columns, [column])
     col = _quote_id(column)
@@ -517,6 +521,10 @@ def pivot_wider(relation: duckdb.DuckDBPyRelation,
     """
     Pivot data from long to wide format.
     """
+    if not isinstance(name_col, str) or not name_col.strip():
+        raise ValueError("name_col must be a non-empty string")
+    if not isinstance(value_col, str) or not value_col.strip():
+        raise ValueError("value_col must be a non-empty string")
     table_name = _register_relation(conn, relation)
 
     if isinstance(id_cols, str):
@@ -550,6 +558,10 @@ def pivot_longer(relation: duckdb.DuckDBPyRelation,
     """
     Pivot data from wide to long format.
     """
+    if not isinstance(names_to, str) or not names_to.strip():
+        raise ValueError("names_to must be a non-empty string")
+    if not isinstance(values_to, str) or not values_to.strip():
+        raise ValueError("values_to must be a non-empty string")
     table_name = _register_relation(conn, relation)
 
     if isinstance(cols, str):
@@ -587,6 +599,8 @@ def truncate_datetime(relation: duckdb.DuckDBPyRelation, column: str,
     """
     Truncate a datetime column to a specified unit.
     """
+    if target_column is not None and (not isinstance(target_column, str) or not target_column.strip()):
+        raise ValueError("target_column must be a non-empty string or None")
     table_name = _register_relation(conn, relation)
     old_columns = relation.columns
     _ensure_columns_exist(old_columns, [column])

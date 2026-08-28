@@ -81,7 +81,7 @@ print(result)
 
 pyduck-janitor implements **51 functions** across three modules:
 
-### Core Module (`cleaning_ops.py`) - 14 functions
+### Core Module (`cleaning_ops.py`) - 16 functions
 - `clean_names()` - Clean column names
 - `remove_columns()` - Remove columns
 - `add_column()` - Add a new column
@@ -99,7 +99,7 @@ pyduck-janitor implements **51 functions** across three modules:
 - `transform_column()` - Transform single column
 - `transform_columns()` - Transform multiple columns
 
-### Extended Module (`cleaning_ops_extended.py`) - 17 functions
+### Extended Module (`cleaning_ops_extended.py`) - 18 functions
 - `bin_numeric()` - Bin numeric column
 - `change_type()` - Change column type
 - `concatenate_columns()` - Join columns
@@ -118,11 +118,8 @@ pyduck-janitor implements **51 functions** across three modules:
 - `truncate_datetime()` - Truncate datetime
 - `pivot_wider()` - Pivot to wide format
 - `pivot_longer()` - Pivot to long format
-- `also()` - Apply multiple operations
-- `alias()` - Create column aliases
-- `mutate()` - Add/modify columns
 
-### Final/Hybrid Module (`cleaning_ops_final.py`) - 24 functions
+### Final/Hybrid Module (`cleaning_ops_final.py`) - 17 functions
 - `conditional_join()` - Join with condition
 - `get_dupes()` - Find duplicate rows
 - `dropnotnull()` - Drop non-null values
@@ -132,10 +129,10 @@ pyduck-janitor implements **51 functions** across three modules:
 - `label_encode()` - Encode as integers
 - `find_replace()` - Replace values
 - `count_cumulative_unique()` - Count unique values
-- `expand_grid()` - Create grid expansion
 - `complete()` - Complete missing combinations
-- `pivot()` - Pivot data
-- `collapse_levels()` - Collapse MultiIndex
+- `also()` - Apply multiple operations
+- `alias()` - Create column aliases
+- `mutate()` - Add/modify columns
 - `drop_duplicate_columns()` - Remove duplicate columns
 - `compare_df_cols()` - Compare column contents
 - `join_apply()` - Apply function to joined data

@@ -18,16 +18,24 @@ All notable changes to this project are documented in this file.
 - SQL-fragment validator now strips string literals and quoted identifiers before pattern matching, preventing false positives on values like `'a--b'` or column names like `drop`.
 - Destructive keyword matching now uses statement-form patterns (e.g. `DROP TABLE`, `DELETE FROM`) instead of bare keyword matching, allowing column names that match reserved words.
 - Added input validation for missing columns and invalid argument values across core, extended, and final cleaning operations.
+- Added consistent `target_column` validation across `min_max_scale`, `transform_column`, `truncate_datetime`, `pivot_wider`, and `pivot_longer` (M3).
 - Improved `DuckJanitor.sql()` self-table replacement to use word-boundary replacement.
 - Added stricter typing updates (`DuckJanitor.__init__ -> None`, typed kwargs in selected methods).
 - Improved hybrid robustness for `join_apply` when joining relations from different DuckDB connections.
 - `filter_string` now catches `re.error` and raises a clean `ValueError` with an actionable message.
+- `transform_columns` now accepts any sequence (not just `list`) for `target_columns` (L4).
+- Fixed README "Supported Functions" counts to match actual module contents (L2).
+- Updated CONTRIBUTING.md git clone URL from placeholder to actual repo (L7).
+
+### Removed
+- Removed duplicate import entry for `truncate_datetime` in `pyduck_janitor/__init__.py`.
+- Removed unused `re` import from `cleaning_ops_extended.py` and `cleaning_ops_final.py`.
+- Removed unused `escaped_col` variable in `pivot_longer`.
 
 ### Fixed
-- Removed dead/unused code in cleaning modules.
-- Removed duplicate import entry for `truncate_datetime` in `pyduck_janitor/__init__.py`.
 - Fixed `_validate_sql_fragment` false positives (H1/H2 from minimax review) that blocked legitimate string literals and column names.
 - Fixed `filter_string` to raise `ValueError` instead of raw `re.error` for invalid regex patterns (H3).
+- Fixed `add_column` to fall back to string literal when SQL validation rejects the value (M4).
 
 ## 0.1.2
 - Production-ready stabilization, pure SQL rewrites, and test expansion.

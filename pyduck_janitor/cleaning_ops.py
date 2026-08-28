@@ -257,16 +257,22 @@ def add_column(relation: duckdb.DuckDBPyRelation, column_name: str,
         raise ValueError("column_name must be a non-empty string")
 
     if isinstance(values, str):
-        # Could be a SQL expression or a column name, or a literal string (which needs quoting).
+        # Could be a SQL expression, a column name, or a literal string.
         table_name = _register_relation(conn, relation)
-        _validate_sql_fragment(values, context="Column expression")
-        # Try executing as SQL expression/column first
+        # Try executing as SQL expression/column first.
+        # Validate the fragment only when we attempt SQL interpretation.
         try:
+            _validate_sql_fragment(values, context="Column expression")
             query = f"SELECT *, ({values}) AS {_quote_id(column_name)} FROM {table_name}"
             # Test query execution (using LIMIT 0 to avoid computing rows)
             conn.execute(f"SELECT ({values}) FROM {table_name} LIMIT 0")
             return conn.query(query)
-        except Exception as exc:
+        except ValueError:
+            # Validation rejected the fragment — treat as string literal.
+            literal_val = _sql_literal(values)
+            query = f"SELECT *, {literal_val} AS {_quote_id(column_name)} FROM {table_name}"
+            return conn.query(query)
+        except Exception:
             # If binder/parsing exception (like missing column reference), treat as string literal
             literal_val = _sql_literal(values)
             query = f"SELECT *, {literal_val} AS {_quote_id(column_name)} FROM {table_name}"
@@ -725,6 +731,8 @@ def transform_column(relation: duckdb.DuckDBPyRelation, column: str,
     """
     old_columns = relation.columns
     _ensure_columns_exist(old_columns, [column])
+    if target_column is not None and (not isinstance(target_column, str) or not target_column.strip()):
+        raise ValueError("target_column must be a non-empty string or None")
     
     if isinstance(func, str):
         # SQL expression
@@ -776,7 +784,7 @@ def transform_columns(relation: duckdb.DuckDBPyRelation, columns: Union[str, Lis
         target_columns = columns
     elif isinstance(target_columns, str):
         target_columns = [target_columns]
-    if isinstance(target_columns, list) and len(target_columns) != len(columns):
+    if hasattr(target_columns, '__len__') and not isinstance(target_columns, str) and len(target_columns) != len(columns):
         raise ValueError("target_columns must be the same length as columns")
     
     # For now, use transform_column for each column

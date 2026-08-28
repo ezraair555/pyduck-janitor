@@ -320,3 +320,149 @@ def test_sql_word_boundary_replacement() -> None:
     assert "selfish" in result.columns
     assert list(result["selfish"]) == [1, 2]
     assert list(result["val"]) == [10, 20]
+
+
+# ---- M4: add_column with literal string containing semicolon ----
+
+def test_add_column_literal_string_with_semicolon() -> None:
+    """add_column should fall back to literal for strings that fail SQL validation (M4 fix)."""
+    df = pd.DataFrame({"a": [1, 2, 3]})
+    dj = DuckJanitor.from_pandas(df)
+    result = dj.add_column("note", "abc; def").collect()
+    assert list(result["note"]) == ["abc; def", "abc; def", "abc; def"]
+
+
+# ---- M5: validation branch coverage ----
+
+def test_clean_names_rejects_invalid_case_type(sample_df: pd.DataFrame) -> None:
+    dj = DuckJanitor.from_pandas(sample_df)
+    with pytest.raises(ValueError, match="case_type must be one of"):
+        dj.clean_names(case_type="invalid").collect()
+
+
+def test_remove_columns_rejects_empty_list(sample_df: pd.DataFrame) -> None:
+    dj = DuckJanitor.from_pandas(sample_df)
+    with pytest.raises(ValueError, match="at least one"):
+        dj.remove_columns([]).collect()
+
+
+def test_add_column_rejects_empty_name(sample_df: pd.DataFrame) -> None:
+    dj = DuckJanitor.from_pandas(sample_df)
+    with pytest.raises(ValueError, match="column_name"):
+        dj.add_column("", 42).collect()
+
+
+def test_rename_column_rejects_empty_new_name(sample_df: pd.DataFrame) -> None:
+    dj = DuckJanitor.from_pandas(sample_df)
+    with pytest.raises(ValueError, match="new_name"):
+        dj.rename_column("age", "").collect()
+
+
+def test_transform_columns_rejects_length_mismatch(sample_df: pd.DataFrame) -> None:
+    dj = DuckJanitor.from_pandas(sample_df)
+    with pytest.raises(ValueError, match="same length"):
+        dj.transform_columns(["age", "value"], "col + 1", target_columns=["x"]).collect()
+
+
+def test_conditional_join_rejects_invalid_how(sample_df: pd.DataFrame) -> None:
+    dj = DuckJanitor.from_pandas(sample_df)
+    other = DuckJanitor.from_pandas(sample_df)
+    with pytest.raises(ValueError, match="how must be one of"):
+        dj.conditional_join(other, [("age", "age", ">")], how="outer").collect()
+
+
+def test_flag_nulls_missing_column(sample_df: pd.DataFrame) -> None:
+    dj = DuckJanitor.from_pandas(sample_df)
+    with pytest.raises(ValueError, match="Unknown column"):
+        dj.flag_nulls(columns="missing").collect()
+
+
+def test_limit_column_characters_rejects_negative(sample_df: pd.DataFrame) -> None:
+    dj = DuckJanitor.from_pandas(sample_df)
+    with pytest.raises(ValueError, match="max_chars must be >= 0"):
+        dj.limit_column_characters("name", -1).collect()
+
+
+def test_get_dupes_rejects_empty_columns(sample_df: pd.DataFrame) -> None:
+    dj = DuckJanitor.from_pandas(sample_df)
+    with pytest.raises(ValueError, match="at least one"):
+        dj.get_dupes(columns=[]).collect()
+
+
+def test_dropnotnull_rejects_empty_subset(sample_df: pd.DataFrame) -> None:
+    dj = DuckJanitor.from_pandas(sample_df)
+    with pytest.raises(ValueError, match="at least one"):
+        dj.dropnotnull(subset=[]).collect()
+
+
+def test_label_encode_rejects_empty_columns(sample_df: pd.DataFrame) -> None:
+    dj = DuckJanitor.from_pandas(sample_df)
+    with pytest.raises(ValueError, match="at least one"):
+        dj.label_encode(columns=[]).collect()
+
+
+def test_complete_rejects_empty_columns(sample_df: pd.DataFrame) -> None:
+    dj = DuckJanitor.from_pandas(sample_df)
+    with pytest.raises(ValueError, match="at least one"):
+        dj.complete(columns=[]).collect()
+
+
+def test_case_when_rejects_empty_conditions(sample_df: pd.DataFrame) -> None:
+    dj = DuckJanitor.from_pandas(sample_df)
+    with pytest.raises(ValueError, match="conditions"):
+        dj.case_when([], "result").collect()
+
+
+def test_alias_callable_returning_empty(sample_df: pd.DataFrame) -> None:
+    dj = DuckJanitor.from_pandas(sample_df)
+    with pytest.raises(ValueError, match="non-empty string"):
+        dj.alias(lambda col: "").collect()
+
+
+def test_min_max_scale_rejects_empty_target(sample_df: pd.DataFrame) -> None:
+    dj = DuckJanitor.from_pandas(sample_df)
+    with pytest.raises(ValueError, match="target_column"):
+        dj.min_max_scale("age", "").collect()
+
+
+def test_pivot_wider_rejects_empty_name_col(sample_df: pd.DataFrame) -> None:
+    dj = DuckJanitor.from_pandas(sample_df)
+    with pytest.raises(ValueError, match="name_col"):
+        dj.pivot_wider("name", "", "age").collect()
+
+
+def test_pivot_longer_rejects_empty_names_to(sample_df: pd.DataFrame) -> None:
+    dj = DuckJanitor.from_pandas(sample_df)
+    with pytest.raises(ValueError, match="names_to"):
+        dj.pivot_longer("age", names_to="", values_to="val").collect()
+
+
+# ---- M2: find_replace with numeric keys/values ----
+
+def test_find_replace_numeric_keys_values() -> None:
+    """find_replace should accept numeric keys and values (M2 regression test)."""
+    df = pd.DataFrame({"code": [1, 2, 3]})
+    dj = DuckJanitor.from_pandas(df)
+    result = dj.find_replace("code", {1: 100, 2: 200}, target_column="code_new").collect()
+    assert result["code_new"].iloc[0] == 100
+    assert result["code_new"].iloc[1] == 200
+    assert result["code_new"].isna().iloc[2]  # unmatched row becomes NULL
+
+
+# ---- M6: positive control for filter_column ----
+
+def test_filter_column_positive_control(sample_df: pd.DataFrame) -> None:
+    """filter_column should pass through legitimate SQL predicates (M6 fix)."""
+    dj = DuckJanitor.from_pandas(sample_df)
+    result = dj.filter_column("age", "age > 25").collect()
+    assert len(result) == 2
+    assert "charlie" in result["name"].tolist()
+
+
+# ---- L6: head(n=0) edge case ----
+
+def test_head_zero_returns_empty(sample_df: pd.DataFrame) -> None:
+    """head(n=0) should return an empty DataFrame (L6)."""
+    dj = DuckJanitor.from_pandas(sample_df)
+    result = dj.head(0)
+    assert result.empty
