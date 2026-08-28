@@ -57,7 +57,7 @@ def _validate_sql_fragment(fragment: str, context: str = "SQL expression") -> No
         raise ValueError(f"{context} must be a single SQL fragment and cannot contain ';'.")
     if "--" in text or "/*" in text or "*/" in text:
         raise ValueError(f"{context} cannot contain SQL comments.")
-    if re.search(r"\b(attach|detach|copy|call|create|drop|alter|insert|update|delete|truncate)\b", text, flags=re.IGNORECASE):
+    if re.search(r"\b(attach|detach|copy|call|create|drop|alter|insert|update|delete|truncate|select)\b", text, flags=re.IGNORECASE):
         raise ValueError(
             f"{context} contains a disallowed SQL keyword. "
             "Only non-destructive expressions/predicates are allowed."

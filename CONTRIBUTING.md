@@ -5,7 +5,7 @@ Thanks for contributing.
 ## Development Setup
 
 ```bash
-git clone https://github.com/yourusername/pyduck-janitor.git
+git clone https://github.com/ezraair555/pyduck-janitor.git
 cd pyduck-janitor
 python3 -m venv .venv
 source .venv/bin/activate
