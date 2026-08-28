@@ -241,3 +241,82 @@ def test_alias_rejects_empty_string(alias_value: str, sample_df: pd.DataFrame) -
     """alias should reject empty string aliases."""
     with pytest.raises(ValueError):
         DuckJanitor.from_pandas(sample_df).alias(alias_value).collect()
+
+
+# ---- H1/H2: SQL fragment validator should not block legitimate values ----
+
+def test_filter_on_allows_string_literal_with_dashes(sample_df: pd.DataFrame) -> None:
+    """filter_on should allow string literals containing -- (H1 fix)."""
+    df = pd.DataFrame({"name": ["a--b", "c", "d"], "age": [1, 2, 3]})
+    dj = DuckJanitor.from_pandas(df)
+    result = dj.filter_on("name = 'a--b'").collect()
+    assert len(result) == 1
+    assert result["name"].iloc[0] == "a--b"
+
+
+def test_filter_on_allows_string_literal_with_comment_markers() -> None:
+    """filter_on should allow string literals containing /* */ (H1 fix)."""
+    df = pd.DataFrame({"comment": ["see /* note */", "x", "y"]})
+    dj = DuckJanitor.from_pandas(df)
+    result = dj.filter_on("comment = 'see /* note */'").collect()
+    assert len(result) == 1
+
+
+def test_filter_on_allows_column_named_drop() -> None:
+    """filter_on should allow column references whose names match reserved words (H2 fix)."""
+    df = pd.DataFrame({"drop": [10, 20, 30]})
+    dj = DuckJanitor.from_pandas(df)
+    result = dj.filter_on("drop > 15").collect()
+    assert len(result) == 2
+
+
+def test_add_column_allows_column_named_update() -> None:
+    """add_column should allow SQL expressions referencing columns named like keywords (H2 fix)."""
+    df = pd.DataFrame({"update": [1, 2, 3]})
+    dj = DuckJanitor.from_pandas(df)
+    result = dj.add_column("y", "update + 1").collect()
+    assert list(result["y"]) == [2, 3, 4]
+
+
+def test_filter_on_still_blocks_select_from(sample_df: pd.DataFrame) -> None:
+    """filter_on should still block SELECT ... FROM statements."""
+    dj = DuckJanitor.from_pandas(sample_df)
+    with pytest.raises(ValueError, match="disallowed SQL statement"):
+        dj.filter_on("SELECT * FROM users").collect()
+
+
+def test_filter_on_still_blocks_delete_from(sample_df: pd.DataFrame) -> None:
+    """filter_on should still block DELETE FROM statements."""
+    dj = DuckJanitor.from_pandas(sample_df)
+    with pytest.raises(ValueError, match="disallowed SQL statement"):
+        dj.filter_on("DELETE FROM users WHERE 1=1").collect()
+
+
+# ---- H3: filter_string regex error handling ----
+
+def test_filter_string_invalid_regex_raises_value_error(sample_df: pd.DataFrame) -> None:
+    """filter_string should raise ValueError (not re.error) for invalid regex (H3 fix)."""
+    dj = DuckJanitor.from_pandas(sample_df)
+    with pytest.raises(ValueError, match="Invalid regex pattern"):
+        dj.filter_string("name", "[invalid", regex=True).collect()
+
+
+def test_filter_string_valid_regex_works(sample_df: pd.DataFrame) -> None:
+    """filter_string should work with a valid regex pattern."""
+    dj = DuckJanitor.from_pandas(sample_df)
+    result = dj.filter_string("name", "^a", regex=True).collect()
+    assert len(result) == 1
+    assert result["name"].iloc[0] == "alice"
+
+
+# ---- L8: DuckJanitor.sql() word-boundary replacement ----
+
+def test_sql_word_boundary_replacement() -> None:
+    """sql() should only replace the standalone word 'self', not substrings."""
+    df = pd.DataFrame({"selfish": [1, 2], "val": [10, 20]})
+    dj = DuckJanitor.from_pandas(df)
+    # 'self' should be replaced with the temp table name; 'selfish' should remain
+    result = dj.sql("SELECT selfish, val FROM self").collect()
+    assert "selfish" in result.columns
+    assert list(result["selfish"]) == [1, 2]
+    assert list(result["val"]) == [10, 20]

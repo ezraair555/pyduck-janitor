@@ -48,20 +48,61 @@ def _ensure_columns_exist(available_columns: Iterable[str], requested_columns: I
         )
 
 
+def _strip_sql_literals(text: str) -> str:
+    """Remove single-quoted string literals and double-quoted identifiers from *text*.
+
+    This allows the SQL-fragment validator to inspect only the structural SQL
+    tokens, not values or column names that happen to contain blocked patterns.
+    """
+    # Remove single-quoted strings (SQL escapes '' for a literal quote)
+    text = re.sub(r"'(?:[^']|'')*'", "''", text)
+    # Remove double-quoted identifiers (SQL escapes "" for a literal quote)
+    text = re.sub(r'"(?:[^"]|"")*"', '""', text)
+    return text
+
+
 def _validate_sql_fragment(fragment: str, context: str = "SQL expression") -> None:
-    """Reject multi-statement or destructive SQL fragments."""
+    """Reject multi-statement or destructive SQL fragments.
+
+    Strips string literals and quoted identifiers before pattern matching so
+    that values like ``'a--b'`` or column names like ``"drop"`` do not
+    trigger false positives.
+    """
     text = fragment.strip()
     if not text:
         raise ValueError(f"{context} cannot be empty.")
     if ";" in text:
         raise ValueError(f"{context} must be a single SQL fragment and cannot contain ';'.")
-    if "--" in text or "/*" in text or "*/" in text:
+
+    stripped = _strip_sql_literals(text)
+
+    # Check for SQL comments only in the structural part (outside literals)
+    if "--" in stripped or "/*" in stripped or "*/" in stripped:
         raise ValueError(f"{context} cannot contain SQL comments.")
-    if re.search(r"\b(attach|detach|copy|call|create|drop|alter|insert|update|delete|truncate|select)\b", text, flags=re.IGNORECASE):
-        raise ValueError(
-            f"{context} contains a disallowed SQL keyword. "
-            "Only non-destructive expressions/predicates are allowed."
-        )
+
+    # Block statement-form keywords: DROP TABLE, DELETE FROM, INSERT INTO, etc.
+    # Using keyword + whitespace + target to avoid blocking column names
+    # that happen to match reserved words (e.g. a column named "drop").
+    destructive_patterns = [
+        r"\bDROP\s+(TABLE|VIEW|INDEX|DATABASE|SCHEMA)\b",
+        r"\bDELETE\s+FROM\b",
+        r"\bINSERT\s+INTO\b",
+        r"\bUPDATE\s+\w+\s+SET\b",
+        r"\bCREATE\s+(TABLE|VIEW|INDEX|DATABASE|SCHEMA|SEQUENCE|FUNCTION)\b",
+        r"\bALTER\s+TABLE\b",
+        r"\bTRUNCATE\s+TABLE\b",
+        r"\bATTACH\s+(DATABASE|PARQUET|CSV)\b",
+        r"\bDETACH\s+DATABASE\b",
+        r"\bCOPY\s+\w+\s+(TO|FROM)\b",
+        r"\bCALL\s+\w+\s*\(",
+        r"\bSELECT\s+.+\s+FROM\b",
+    ]
+    for pattern in destructive_patterns:
+        if re.search(pattern, stripped, flags=re.IGNORECASE):
+            raise ValueError(
+                f"{context} contains a disallowed SQL statement. "
+                "Only non-destructive expressions/predicates are allowed."
+            )
 
 
 def clean_names(relation: duckdb.DuckDBPyRelation, strip_underscores: bool = True,
@@ -816,7 +857,10 @@ def filter_string(relation: duckdb.DuckDBPyRelation, column: str, search_string:
     pat = _sql_literal(search_string)
     
     if regex:
-        re.compile(search_string)
+        try:
+            re.compile(search_string)
+        except re.error as exc:
+            raise ValueError(f"Invalid regex pattern for filter_string: {exc}") from exc
         op = 'NOT ' if complement else ''
         query = f"SELECT * FROM {table_name} WHERE {op}regexp_matches({col}, {pat})"
     else:

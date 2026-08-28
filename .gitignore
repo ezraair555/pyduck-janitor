@@ -155,3 +155,4 @@ IDENTITY.md
 SOUL.md
 TOOLS.md
 USER.md
+tests/property_cleaning_ops.py
