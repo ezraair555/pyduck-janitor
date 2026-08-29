@@ -36,6 +36,85 @@ class TestDuckJanitor:
         
         assert isinstance(dj, DuckJanitor)
         assert len(dj.head()) == len(sample_data)
+
+    def test_from_excel(self, tmp_path):
+        """Test creating DuckJanitor from an Excel file."""
+        df = pd.DataFrame({
+            'Name': ['Alice', 'Bob', 'Charlie'],
+            'Age': [25, 30, 35],
+            'Score': [88.5, 92.0, 76.3],
+        })
+        xlsx_path = tmp_path / 'test_data.xlsx'
+        df.to_excel(xlsx_path, index=False, engine='openpyxl')
+
+        dj = DuckJanitor.from_excel(xlsx_path)
+        assert isinstance(dj, DuckJanitor)
+        result = dj.collect()
+        assert result.shape == df.shape
+        assert list(result.columns) == ['Name', 'Age', 'Score']
+        assert result['Age'].tolist() == [25, 30, 35]
+
+    def test_from_excel_sheet_name(self, tmp_path):
+        """Test from_excel with a specific sheet name."""
+        df1 = pd.DataFrame({'A': [1, 2], 'B': [3, 4]})
+        df2 = pd.DataFrame({'X': ['a', 'b'], 'Y': ['c', 'd']})
+        xlsx_path = tmp_path / 'multi_sheet.xlsx'
+        with pd.ExcelWriter(xlsx_path, engine='openpyxl') as writer:
+            df1.to_excel(writer, sheet_name='first', index=False)
+            df2.to_excel(writer, sheet_name='second', index=False)
+
+        dj = DuckJanitor.from_excel(xlsx_path, sheet_name='second')
+        result = dj.collect()
+        assert list(result.columns) == ['X', 'Y']
+        assert len(result) == 2
+
+    def test_from_excel_usecols(self, tmp_path):
+        """Test from_excel with usecols to select specific columns."""
+        df = pd.DataFrame({
+            'Name': ['Alice', 'Bob', 'Charlie', 'Diana'],
+            'Age': [25, 30, 35, 40],
+            'City': ['NYC', 'LA', 'Chicago', 'Houston'],
+            'Salary': [50000, 60000, 70000, 80000],
+        })
+        xlsx_path = tmp_path / 'cols_test.xlsx'
+        df.to_excel(xlsx_path, index=False, engine='openpyxl')
+
+        dj = DuckJanitor.from_excel(xlsx_path, usecols=['Name', 'Salary'])
+        result = dj.collect()
+        assert list(result.columns) == ['Name', 'Salary']
+        assert len(result) == 4
+        assert result['Name'].tolist() == ['Alice', 'Bob', 'Charlie', 'Diana']
+
+    def test_from_excel_skiprows(self, tmp_path):
+        """Test from_excel with header offset to skip rows."""
+        df = pd.DataFrame({
+            'Name': ['Alice', 'Bob', 'Charlie', 'Diana'],
+            'Age': [25, 30, 35, 40],
+        })
+        xlsx_path = tmp_path / 'skip_test.xlsx'
+        df.to_excel(xlsx_path, index=False, engine='openpyxl')
+
+        # header=1 means: use the second row as column names, skip row 0
+        dj = DuckJanitor.from_excel(xlsx_path, header=1)
+        result = dj.collect()
+        assert len(result) == 3  # 4 rows - 1 used as header
+        assert list(result.columns) == ['Alice', '25']
+        assert result['Alice'].tolist() == ['Bob', 'Charlie', 'Diana']
+
+    def test_from_excel_all_sheets(self, tmp_path):
+        """Test from_excel with sheet_name=None picks first sheet."""
+        df1 = pd.DataFrame({'A': [1, 2]})
+        df2 = pd.DataFrame({'Z': [9, 8]})
+        xlsx_path = tmp_path / 'all_sheets.xlsx'
+        with pd.ExcelWriter(xlsx_path, engine='openpyxl') as writer:
+            df1.to_excel(writer, sheet_name='alpha', index=False)
+            df2.to_excel(writer, sheet_name='beta', index=False)
+
+        dj = DuckJanitor.from_excel(xlsx_path, sheet_name=None)
+        result = dj.collect()
+        # Should pick the first sheet deterministically
+        assert 'A' in result.columns
+        assert len(result) == 2
     
     def test_collect(self, sample_data):
         """Test collecting results back to pandas."""

@@ -153,6 +153,91 @@ class DuckJanitor:
         return cls(relation, connection=conn)
     
     @classmethod
+    def from_excel(
+        cls,
+        path: Union[str, Path],
+        sheet_name: Union[str, int, None] = 0,
+        header: int = 0,
+        usecols: Optional[Union[str, List[str], List[int]]] = None,
+        skiprows: Optional[Union[int, List[int]]] = None,
+        nrows: Optional[int] = None,
+        na_values: Optional[Any] = None,
+        keep_default_na: bool = True,
+        dtype: Optional[Dict[str, Any]] = None,
+        engine: Optional[str] = None,
+        **kwargs: Any,
+    ) -> 'DuckJanitor':
+        """
+        Create a DuckJanitor from an Excel file (.xlsx, .xls).
+
+        Uses pandas.read_excel as a bridge into DuckDB. This keeps the
+        API consistent with from_csv / from_parquet while relying on
+        the mature openpyxl/xlrd ecosystem for parsing.
+
+        Parameters
+        ----------
+        path : str or Path
+            Path to the Excel file.
+        sheet_name : str, int, or None, optional
+            Sheet to read. 0-based index or sheet name. ``None`` reads
+            all sheets (returns a dict in pandas; only the first is
+            used here — pass a specific name/index to control).
+        header : int, optional
+            Row (0-indexed) to use as column names. Default 0.
+        usecols : str, list, or None, optional
+            Column selector accepted by pandas.read_excel
+            (e.g. ``"A:C"``, ``["Name", "Age"]``, ``[0, 2]``).
+        skiprows : int or list, optional
+            Rows to skip at the start of the sheet.
+        nrows : int, optional
+            Number of rows to read.
+        na_values : scalar, str, list, or dict, optional
+            Additional strings to recognise as NaN.
+        keep_default_na : bool, optional
+            Whether to keep pandas' default NaN recognisers.
+        dtype : dict, optional
+            Column → dtype overrides.
+        engine : str, optional
+            'openpyxl' (xlsx) or 'xlrd' (xls). Auto-detected if omitted.
+        **kwargs
+            Extra keyword args forwarded to ``pandas.read_excel``.
+
+        Returns
+        -------
+        DuckJanitor
+            A DuckJanitor instance.
+
+        Examples
+        --------
+        >>> dj = DuckJanitor.from_excel('data.xlsx')
+        >>> dj = DuckJanitor.from_excel('report.xls', sheet_name='Summary')
+        >>> dj = DuckJanitor.from_excel('data.xlsx', usecols='A:D', skiprows=2)
+        """
+        df = pd.read_excel(
+            str(path),
+            sheet_name=sheet_name,
+            header=header,
+            usecols=usecols,
+            skiprows=skiprows,
+            nrows=nrows,
+            na_values=na_values,
+            keep_default_na=keep_default_na,
+            dtype=dtype,
+            engine=engine,
+            **kwargs,
+        )
+        # If sheet_name=None, pandas returns a dict of DataFrames.
+        if isinstance(df, dict):
+            if not df:
+                raise ValueError(
+                    f"Excel file '{path}' contains no sheets."
+                )
+            # Take the first sheet deterministically.
+            first_key = next(iter(df))
+            df = df[first_key]
+        return cls.from_pandas(df)
+
+    @classmethod
     def from_sql(cls, query: str, connection: Optional[duckdb.DuckDBPyConnection] = None) -> 'DuckJanitor':
         """
         Create a DuckJanitor from a SQL query.
