@@ -151,7 +151,75 @@ class DuckJanitor:
         conn = cls.get_shared_connection()
         relation = conn.read_csv(str(path), **kwargs)
         return cls(relation, connection=conn)
-    
+
+    @classmethod
+    def from_json(
+        cls,
+        path: Union[str, Path, List[Union[str, Path]]],
+        format: str = 'auto',
+        **kwargs: Any,
+    ) -> 'DuckJanitor':
+        """
+        Create a DuckJanitor from JSON / NDJSON file(s).
+
+        Leverages DuckDB's native ``read_json_auto`` — no pandas bridge,
+        so schema inference, compression detection, and glob patterns
+        all work out of the box.
+
+        Parameters
+        ----------
+        path : str, Path, or list of str/Path
+            Path(s) to JSON file(s). Supports:
+            - Single file (``data.json``)
+            - NDJSON / JSONL (``logs.jsonl``)
+            - Glob patterns (``data/*.json``)
+            - List of files (``['a.json', 'b.json']``)
+            - Remote URLs (``s3://``, ``https://``) with httpfs loaded
+            - Gzip-compressed (``.json.gz``) — auto-detected
+        format : str, optional
+            ``'auto'`` (default), ``'array'``, or ``'newline_delimited'``.
+            ``'auto'`` lets DuckDB infer from file content/extension.
+        **kwargs
+            Extra arguments forwarded to DuckDB's ``read_json_auto``
+            (e.g. ``columns``, ``records``, ``maximum_object_size``).
+
+        Returns
+        -------
+        DuckJanitor
+            A DuckJanitor instance.
+
+        Examples
+        --------
+        >>> dj = DuckJanitor.from_json('data.json')
+        >>> dj = DuckJanitor.from_json('logs.jsonl')  # NDJSON
+        >>> dj = DuckJanitor.from_json('s3://bucket/data.json')
+        >>> dj = DuckJanitor.from_json('data/*.json')  # glob
+        >>> dj = DuckJanitor.from_json(['part1.json', 'part2.json'])
+        >>> dj = DuckJanitor.from_json('data.json', format='array')
+        """
+        conn = cls.get_shared_connection()
+
+        if isinstance(path, list):
+            path_repr = '[' + ', '.join(repr(str(p)) for p in path) + ']'
+            query = f"SELECT * FROM read_json_auto({path_repr}, format='{format}'"
+        else:
+            query = f"SELECT * FROM read_json_auto({repr(str(path))}, format='{format}'"
+
+        if kwargs:
+            for k, v in kwargs.items():
+                if isinstance(v, str):
+                    query += f", {k}='{v}'"
+                elif isinstance(v, bool):
+                    query += f", {k}={str(v).lower()}"
+                elif v is None:
+                    query += f", {k}=NULL"
+                else:
+                    query += f", {k}={v}"
+        query += ')'
+
+        relation = conn.query(query)
+        return cls(relation, connection=conn)
+
     @classmethod
     def from_excel(
         cls,

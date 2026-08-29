@@ -115,7 +115,95 @@ class TestDuckJanitor:
         # Should pick the first sheet deterministically
         assert 'A' in result.columns
         assert len(result) == 2
-    
+
+    def test_from_json(self, tmp_path):
+        """Test creating DuckJanitor from a JSON file."""
+        import json as _json
+        data = [
+            {'Name': 'Alice', 'Age': 25, 'Score': 88.5},
+            {'Name': 'Bob', 'Age': 30, 'Score': 92.0},
+            {'Name': 'Charlie', 'Age': 35, 'Score': 76.3},
+        ]
+        json_path = tmp_path / 'test_data.json'
+        with open(json_path, 'w') as f:
+            _json.dump(data, f)
+
+        dj = DuckJanitor.from_json(json_path)
+        assert isinstance(dj, DuckJanitor)
+        result = dj.collect()
+        assert result.shape == (3, 3)
+        assert list(result.columns) == ['Name', 'Age', 'Score']
+        assert result['Age'].tolist() == [25, 30, 35]
+
+    def test_from_json_ndjson(self, tmp_path):
+        """Test creating DuckJanitor from NDJSON (JSONL) file."""
+        import json as _json
+        records = [
+            {'event': 'login', 'user': 'alice', 'ts': '2026-01-01'},
+            {'event': 'logout', 'user': 'alice', 'ts': '2026-01-02'},
+            {'event': 'login', 'user': 'bob', 'ts': '2026-01-03'},
+        ]
+        jsonl_path = tmp_path / 'events.jsonl'
+        with open(jsonl_path, 'w') as f:
+            for rec in records:
+                f.write(_json.dumps(rec) + '\n')
+
+        dj = DuckJanitor.from_json(jsonl_path)
+        result = dj.collect()
+        assert len(result) == 3
+        assert list(result.columns) == ['event', 'user', 'ts']
+        assert result['event'].tolist() == ['login', 'logout', 'login']
+
+    def test_from_json_glob(self, tmp_path):
+        """Test from_json with glob pattern to read multiple files."""
+        import json as _json
+        _json.dump([{'a': 1, 'b': 'x'}], open(tmp_path / 'part1.json', 'w'))
+        _json.dump([{'a': 2, 'b': 'y'}], open(tmp_path / 'part2.json', 'w'))
+
+        dj = DuckJanitor.from_json(str(tmp_path / '*.json'))
+        result = dj.collect()
+        assert len(result) == 2
+        assert set(result.columns) == {'a', 'b'}
+
+    def test_from_json_file_list(self, tmp_path):
+        """Test from_json with explicit list of file paths."""
+        import json as _json
+        f1 = tmp_path / 'f1.json'
+        f2 = tmp_path / 'f2.json'
+        _json.dump([{'a': 1}], open(f1, 'w'))
+        _json.dump([{'a': 2}], open(f2, 'w'))
+
+        dj = DuckJanitor.from_json([str(f1), str(f2)])
+        result = dj.collect()
+        assert len(result) == 2
+        assert result['a'].tolist() == [1, 2]
+
+    def test_from_json_gzipped(self, tmp_path):
+        """Test from_json with gzip-compressed JSON."""
+        import json as _json, gzip
+        data = [{'x': 10, 'y': 'a'}, {'x': 20, 'y': 'b'}]
+        gz_path = tmp_path / 'data.json.gz'
+        with gzip.open(gz_path, 'wt') as f:
+            _json.dump(data, f)
+
+        dj = DuckJanitor.from_json(gz_path)
+        result = dj.collect()
+        assert len(result) == 2
+        assert result['x'].tolist() == [10, 20]
+
+    def test_from_json_format_explicit(self, tmp_path):
+        """Test from_json with explicit format='array'."""
+        import json as _json
+        data = [{'a': 1, 'b': 'x'}, {'a': 2, 'b': 'y'}]
+        json_path = tmp_path / 'explicit.json'
+        with open(json_path, 'w') as f:
+            _json.dump(data, f)
+
+        dj = DuckJanitor.from_json(json_path, format='array')
+        result = dj.collect()
+        assert len(result) == 2
+        assert result['a'].tolist() == [1, 2]
+
     def test_collect(self, sample_data):
         """Test collecting results back to pandas."""
         dj = DuckJanitor.from_pandas(sample_data)
