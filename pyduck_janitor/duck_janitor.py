@@ -824,27 +824,91 @@ class DuckJanitor:
     
     def bin_numeric(self, column: str, target_column: str, bins: Union[int, List[float]] = 5,
                     strategy: str = 'quantile') -> 'DuckJanitor':
-        """Bin a numeric column into discrete intervals."""
+        """Bin a numeric column into discrete intervals.
+
+        Parameters
+        ----------
+        column : str
+            Name of the numeric column to bin.
+        target_column : str
+            Name of the output column holding the bin label.
+        bins : int or list of float, default 5
+            Either the number of equal-width/quantile bins (when ``int``)
+            or an explicit list of bin edges.
+        strategy : str, default 'quantile'
+            ``'quantile'`` (DuckDB ``NTILE``) or ``'equal_width'``.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with ``target_column`` added.
+        """
         from .cleaning_ops_extended import bin_numeric as _bin_numeric
         new_relation = _bin_numeric(self._relation, column, target_column, bins, strategy, self._connection)
         return DuckJanitor(new_relation, self._connection)
     
     def change_type(self, column: str, dtype: str) -> 'DuckJanitor':
-        """Change the data type of a column."""
+        """Change the data type of a column.
+
+        Parameters
+        ----------
+        column : str
+            Name of the column to cast.
+        dtype : str
+            DuckDB type name (``'INT'``, ``'VARCHAR'``, ``'DOUBLE'``,
+            ``'DATE'``, ``'TIMESTAMP'``, etc).
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with ``column`` cast in place.
+        """
         from .cleaning_ops_extended import change_type as _change_type
         new_relation = _change_type(self._relation, column, dtype, self._connection)
         return DuckJanitor(new_relation, self._connection)
     
     def concatenate_columns(self, columns: List[str], sep: str = '_',
                             target_column: str = 'concatenated') -> 'DuckJanitor':
-        """Concatenate multiple columns into a single column."""
+        """Concatenate multiple columns into a single column.
+
+        Parameters
+        ----------
+        columns : list of str
+            Names of the columns to concatenate.
+        sep : str, default '_'
+            Separator inserted between values.
+        target_column : str, default 'concatenated'
+            Name of the output column.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with ``target_column`` added.
+        """
         from .cleaning_ops_extended import concatenate_columns as _concatenate_columns
         new_relation = _concatenate_columns(self._relation, columns, sep, target_column, self._connection)
         return DuckJanitor(new_relation, self._connection)
     
     def deconcatenate_column(self, column: str, sep: str,
                              target_columns: List[str]) -> 'DuckJanitor':
-        """Split a column into multiple columns based on a delimiter."""
+        """Split a column into multiple columns based on a delimiter.
+
+        Parameters
+        ----------
+        column : str
+            Name of the column to split.
+        sep : str
+            Delimiter on which to split (literal, not regex).
+        target_columns : list of str
+            Names of the output columns; positional split results land
+            in order.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with ``target_columns`` added
+            and ``column`` dropped.
+        """
         from .cleaning_ops_extended import deconcatenate_column as _deconcatenate_column
         new_relation = _deconcatenate_column(self._relation, column, sep, target_columns, self._connection)
         return DuckJanitor(new_relation, self._connection)
@@ -864,13 +928,47 @@ class DuckJanitor:
     def fill(self, column: str, value: Optional[Any] = None,
              direction: str = 'forward',
              group_by: Optional[Union[str, List[str]]] = None) -> 'DuckJanitor':
-        """Fill missing values in a column."""
+        """Fill missing values in a column.
+
+        Parameters
+        ----------
+        column : str
+            Name of the column to fill.
+        value : Any, optional
+            Scalar literal to fill missing cells with. When ``None``,
+            forward/backward fill is used (see ``direction``).
+        direction : str, default 'forward'
+            ``'forward'`` (carry the last non-null), ``'backward'``
+            (carry the next non-null), or ``'downcast'`` (do nothing).
+            Ignored when ``value`` is provided.
+        group_by : str or list of str, optional
+            Restrict the fill to groups defined by these columns
+            (DuckDB window function).
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with missing values filled.
+        """
         from .cleaning_ops_extended import fill as _fill
         new_relation = _fill(self._relation, column, value, direction, group_by, self._connection)
         return DuckJanitor(new_relation, self._connection)
     
     def fill_empty(self, column: str, value: str = '') -> 'DuckJanitor':
-        """Fill empty strings in a column with a specified value."""
+        """Fill empty strings in a column with a specified value.
+
+        Parameters
+        ----------
+        column : str
+            Name of the column to fill.
+        value : str, default ''
+            Replacement for empty strings (``''`` keeps empties empty).
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with empty strings replaced.
+        """
         from .cleaning_ops_extended import fill_empty as _fill_empty
         new_relation = _fill_empty(self._relation, column, value, self._connection)
         return DuckJanitor(new_relation, self._connection)
@@ -878,21 +976,72 @@ class DuckJanitor:
     def flag_nulls(self, columns: Optional[Union[str, List[str]]] = None,
                    prefix: str = 'is_null_', present_value: Any = 1,
                    absent_value: Any = 0) -> 'DuckJanitor':
-        """Flag null values in specified columns with binary indicators."""
+        """Flag null values in specified columns with binary indicators.
+
+        Parameters
+        ----------
+        columns : str or list of str, optional
+            Columns to flag. ``None`` means all columns.
+        prefix : str, default 'is_null_'
+            Prefix for each output column name (the source column is
+            appended, e.g. ``is_null_age``).
+        present_value : Any, default 1
+            Value to write when the source cell is ``NULL``.
+        absent_value : Any, default 0
+            Value to write when the source cell is non-null.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the new flag columns added.
+        """
         from .cleaning_ops_extended import flag_nulls as _flag_nulls
         new_relation = _flag_nulls(self._relation, columns, prefix, present_value, absent_value, self._connection)
         return DuckJanitor(new_relation, self._connection)
     
     def limit_column_characters(self, column: str, max_chars: int,
                                 suffix: str = '...') -> 'DuckJanitor':
-        """Limit the number of characters in a string column."""
+        """Limit the number of characters in a string column.
+
+        Parameters
+        ----------
+        column : str
+            Name of the column to truncate.
+        max_chars : int
+            Maximum length of the resulting string, including the suffix.
+        suffix : str, default '...'
+            Appended when the original string is truncated; pass ``''``
+            to suppress.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with ``column`` truncated.
+        """
         from .cleaning_ops_extended import limit_column_characters as _limit_column_characters
         new_relation = _limit_column_characters(self._relation, column, max_chars, suffix, self._connection)
         return DuckJanitor(new_relation, self._connection)
     
     def min_max_scale(self, column: str, target_column: str,
                       min_val: float = 0, max_val: float = 1) -> 'DuckJanitor':
-        """Apply Min-Max scaling to a numeric column."""
+        """Apply Min-Max scaling to a numeric column.
+
+        Parameters
+        ----------
+        column : str
+            Name of the numeric column to scale.
+        target_column : str
+            Name of the output column.
+        min_val : float, default 0
+            Target minimum.
+        max_val : float, default 1
+            Target maximum.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with ``target_column`` added.
+        """
         from .cleaning_ops_extended import min_max_scale as _min_max_scale
         new_relation = _min_max_scale(self._relation, column, target_column, min_val, max_val, self._connection)
         return DuckJanitor(new_relation, self._connection)
@@ -1192,7 +1341,24 @@ class DuckJanitor:
 
     def fill_direction(self, column: str, direction: str = 'forward',
                         value=None, **kwargs) -> 'DuckJanitor':
-        """Alias of :meth:`fill` matching pyjanitor's name."""
+        """Alias of :meth:`fill` matching pyjanitor's name.
+
+        Parameters
+        ----------
+        column : str
+            Name of the column to fill.
+        direction : str, default 'forward'
+            ``'forward'``, ``'backward'``, or ``'downcast'``.
+        value : Any, optional
+            Scalar literal to fill missing cells with.
+        **kwargs
+            Forwarded to :meth:`fill` (e.g. ``group_by=``).
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with missing values filled.
+        """
         return self.fill(column=column, value=value, direction=direction,
                           **kwargs)
 

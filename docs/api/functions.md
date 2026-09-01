@@ -1150,6 +1150,23 @@ Bin a numeric column into discrete intervals.
 bin_numeric(self, column: str, target_column: str, bins: Union[int, List[float]] = 5, strategy: str = 'quantile') -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column** — str
+  Name of the numeric column to bin.
+- **target_column** — str
+  Name of the output column holding the bin label.
+- **bins** — int or list of float, default 5
+  Either the number of equal-width/quantile bins (when ``int``)
+  or an explicit list of bin edges.
+- **strategy** — str, default 'quantile'
+  ``'quantile'`` (DuckDB ``NTILE``) or ``'equal_width'``.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with ``target_column`` added.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -1167,6 +1184,19 @@ Change the data type of a column.
 ```python
 change_type(self, column: str, dtype: str) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **column** — str
+  Name of the column to cast.
+- **dtype** — str
+  DuckDB type name (``'INT'``, ``'VARCHAR'``, ``'DOUBLE'``,
+  ``'DATE'``, ``'TIMESTAMP'``, etc).
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with ``column`` cast in place.
 
 **Example** *(from verified snippet)*
 
@@ -1186,6 +1216,20 @@ Concatenate multiple columns into a single column.
 concatenate_columns(self, columns: List[str], sep: str = '_', target_column: str = 'concatenated') -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **columns** — list of str
+  Names of the columns to concatenate.
+- **sep** — str, default '_'
+  Separator inserted between values.
+- **target_column** — str, default 'concatenated'
+  Name of the output column.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with ``target_column`` added.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -1203,6 +1247,22 @@ Split a column into multiple columns based on a delimiter.
 ```python
 deconcatenate_column(self, column: str, sep: str, target_columns: List[str]) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **column** — str
+  Name of the column to split.
+- **sep** — str
+  Delimiter on which to split (literal, not regex).
+- **target_columns** — list of str
+  Names of the output columns; positional split results land
+  in order.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with ``target_columns`` added
+and ``column`` dropped.
 
 **Example** *(from verified snippet)*
 
@@ -1245,6 +1305,26 @@ Fill missing values in a column.
 fill(self, column: str, value: Optional[Any] = None, direction: str = 'forward', group_by: Union[str, List[str], NoneType] = None) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column** — str
+  Name of the column to fill.
+- **value** — Any, optional
+  Scalar literal to fill missing cells with. When ``None``,
+  forward/backward fill is used (see ``direction``).
+- **direction** — str, default 'forward'
+  ``'forward'`` (carry the last non-null), ``'backward'``
+  (carry the next non-null), or ``'downcast'`` (do nothing).
+  Ignored when ``value`` is provided.
+- **group_by** — str or list of str, optional
+  Restrict the fill to groups defined by these columns
+  (DuckDB window function).
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with missing values filled.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -1262,6 +1342,22 @@ Alias of :meth:`fill` matching pyjanitor's name.
 ```python
 fill_direction(self, column: str, direction: str = 'forward', value=None, **kwargs) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **column** — str
+  Name of the column to fill.
+- **direction** — str, default 'forward'
+  ``'forward'``, ``'backward'``, or ``'downcast'``.
+- **value** — Any, optional
+  Scalar literal to fill missing cells with.
+- **kwargs**
+  Forwarded to :meth:`fill` (e.g. ``group_by=``).
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with missing values filled.
 
 **Example** *(from verified snippet)*
 
@@ -1281,6 +1377,18 @@ Fill empty strings in a column with a specified value.
 fill_empty(self, column: str, value: str = '') -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column** — str
+  Name of the column to fill.
+- **value** — str, default ''
+  Replacement for empty strings (``''`` keeps empties empty).
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with empty strings replaced.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -1298,6 +1406,23 @@ Flag null values in specified columns with binary indicators.
 ```python
 flag_nulls(self, columns: Union[str, List[str], NoneType] = None, prefix: str = 'is_null_', present_value: Any = 1, absent_value: Any = 0) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **columns** — str or list of str, optional
+  Columns to flag. ``None`` means all columns.
+- **prefix** — str, default 'is_null_'
+  Prefix for each output column name (the source column is
+  appended, e.g. ``is_null_age``).
+- **present_value** — Any, default 1
+  Value to write when the source cell is ``NULL``.
+- **absent_value** — Any, default 0
+  Value to write when the source cell is non-null.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the new flag columns added.
 
 **Example** *(from verified snippet)*
 
@@ -1317,6 +1442,21 @@ Limit the number of characters in a string column.
 limit_column_characters(self, column: str, max_chars: int, suffix: str = '...') -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column** — str
+  Name of the column to truncate.
+- **max_chars** — int
+  Maximum length of the resulting string, including the suffix.
+- **suffix** — str, default '...'
+  Appended when the original string is truncated; pass ``''``
+  to suppress.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with ``column`` truncated.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -1334,6 +1474,22 @@ Apply Min-Max scaling to a numeric column.
 ```python
 min_max_scale(self, column: str, target_column: str, min_val: float = 0, max_val: float = 1) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **column** — str
+  Name of the numeric column to scale.
+- **target_column** — str
+  Name of the output column.
+- **min_val** — float, default 0
+  Target minimum.
+- **max_val** — float, default 1
+  Target maximum.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with ``target_column`` added.
 
 **Example** *(from verified snippet)*
 
