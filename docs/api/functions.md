@@ -2895,6 +2895,18 @@ collapsed (no-op since DuckDB columns are flat).
 collapse_levels(self, sep: str = '_', column: Optional[str] = None) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **sep** — str, default '_'
+  Separator inserted between collapsed values.
+- **column** — str, optional
+  Specific column to collapse; ``None`` collapses every column.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the collapsed ``column`` (if any).
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -2915,6 +2927,22 @@ column called ``<column>_parsed`` is created.
 ```python
 explode_index(self, column: str, names: Optional[List[str]] = None, separator: str = '_') -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **column** — str
+  Name of the string column to split.
+- **names** — list of str, optional
+  Output column names; the column is split positionally on
+  ``separator`` into exactly ``len(names)`` new columns.
+- **separator** — str, default '_'
+  Split delimiter.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the parsed sub-field columns
+appended and ``column`` dropped.
 
 **Example** *(from verified snippet)*
 
@@ -2937,6 +2965,20 @@ projecting a typed copy of the first column.
 change_index_dtype(self, dtype: str, target_name: Optional[str] = None) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **dtype** — str
+  DuckDB type name (``'INT'``, ``'BIGINT'``, ``'VARCHAR'``,
+  ``'DATE'``, etc).
+- **target_name** — str, optional
+  Name of the output column; defaults to
+  ``<first_column>_typed``.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with ``target_name`` appended.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -2956,6 +2998,18 @@ Cartesian-expand across the unique values of ``columns`` (R: ``expand``).
 ```python
 expand(self, columns: List[str], on=None) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **columns** — list of str
+  Columns whose unique-value Cartesian product defines the new row set.
+- **on** — unused
+  Accepted for signature parity; currently ignored.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, expanded to the full value grid.
 
 **Example** *(from verified snippet)*
 
@@ -2979,6 +3033,16 @@ the later table's column is suffixed ``_1``, ``_2``, ... in order.
 ```python
 expand_grid(self, *tables) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- ***tables** — DuckJanitor
+  Variadic DuckJanitor relations to cross-join with ``self``.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the cross-joined columns.
 
 **Example** *(from verified snippet)*
 
@@ -3031,6 +3095,25 @@ Long-form pivot driven by a column-name spec (R: ``pivot_longer_spec``).
 pivot_longer_spec(self, id_cols: List[str], value_cols: List[str], names_to: str = 'name', values_to: str = 'value', names_sep: Optional[str] = None) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **id_cols** — list of str
+  Identifier columns that remain as rows.
+- **value_cols** — list of str
+  Columns to unpivot.
+- **names_to** — str, default 'name'
+  Output column holding the unpivoted column names.
+- **values_to** — str, default 'value'
+  Output column holding the unpivoted cell values.
+- **names_sep** — str, optional
+  If provided, multi-part column names are split on this
+  separator into multiple ``names_to*`` columns.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, in long format.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -3048,6 +3131,23 @@ Wide pivot driven by a column-name spec (R: ``pivot_wider_spec``).
 ```python
 pivot_wider_spec(self, id_cols: List[str], names_from: str, values_from: str, names_glue: str = '_') -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **id_cols** — list of str
+  Identifier columns that remain as rows.
+- **names_from** — str
+  Column whose values become the new column names.
+- **values_from** — str
+  Column whose values populate the new columns.
+- **names_glue** — str, default '_'
+  Separator inserted between multi-part names when ``names_from``
+  itself is a derived multi-column.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, in wide format.
 
 **Example** *(from verified snippet)*
 
@@ -3069,6 +3169,23 @@ Aggregate join (R: ``join_agg``) — left-join with arbitrary aggregations.
 join_agg(self, other: 'DuckJanitor', on: tuple, aggs: dict) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **other** — DuckJanitor
+  The right-side relation to join.
+- **on** — tuple
+  ``(left_col, right_col, op_str)`` describing the conditional
+  join key.
+- **aggs** — dict
+  ``{new_column_name: (source_column, agg_function)}`` for the
+  right-side aggregations, e.g.
+  ``{'avg_age': ('age', 'AVG')}``.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the joined+aggregated result.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -3087,6 +3204,20 @@ Compute join key indices without materialising the join (R: ``get_join_indices``
 ```python
 get_join_indices(self, other: 'DuckJanitor', conditions) -> dict
 ```
+
+**Parameters**
+
+- **other** — DuckJanitor
+  The right-side relation to probe against.
+- **conditions** — tuple or list of tuple
+  Either a single ``(left_col, right_col, op_str)`` triple or a
+  list of such triples (logical AND across them).
+
+**Returns**
+
+dict
+``{'left_indices': [...], 'right_indices': [...]}`` — index
+arrays that satisfy the join.
 
 **Example** *(from verified snippet)*
 

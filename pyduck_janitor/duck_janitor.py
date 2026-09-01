@@ -2493,6 +2493,18 @@ class DuckJanitor:
         """Cartesian-expand across the unique values of ``columns`` (R: ``expand``).
 
         ``on`` is unused for now; in R it controls the iteration order.
+
+        Parameters
+        ----------
+        columns : list of str
+            Columns whose unique-value Cartesian product defines the new row set.
+        on : unused
+            Accepted for signature parity; currently ignored.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, expanded to the full value grid.
         """
         if not columns:
             raise ValueError('expand(): columns must be a non-empty list')
@@ -2516,6 +2528,16 @@ class DuckJanitor:
         for every combination of rows across all inputs (a cartesian product
         in the tidyverse sense). Column names are preserved; on collision,
         the later table's column is suffixed ``_1``, ``_2``, ... in order.
+
+        Parameters
+        ----------
+        *tables : DuckJanitor
+            Variadic DuckJanitor relations to cross-join with ``self``.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the cross-joined columns.
         """
         if not tables:
             raise ValueError('expand_grid(): need at least one input')
@@ -2558,6 +2580,20 @@ class DuckJanitor:
 
         DuckDB relations have no intrinsic integer index; we mimic by
         projecting a typed copy of the first column.
+
+        Parameters
+        ----------
+        dtype : str
+            DuckDB type name (``'INT'``, ``'BIGINT'``, ``'VARCHAR'``,
+            ``'DATE'``, etc).
+        target_name : str, optional
+            Name of the output column; defaults to
+            ``<first_column>_typed``.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with ``target_name`` appended.
         """
         cur_cols = list(self._relation.columns)
         if not cur_cols:
@@ -2580,6 +2616,18 @@ class DuckJanitor:
         For simplicity, when ``column`` is None this concatenates all
         columns together. When ``column`` is given, only that column is
         collapsed (no-op since DuckDB columns are flat).
+
+        Parameters
+        ----------
+        sep : str, default '_'
+            Separator inserted between collapsed values.
+        column : str, optional
+            Specific column to collapse; ``None`` collapses every column.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the collapsed ``column`` (if any).
         """
         cur_cols = list(self._relation.columns)
         if column and column not in cur_cols:
@@ -2610,6 +2658,22 @@ class DuckJanitor:
 
         ``names`` lists the new column names. By default a single new
         column called ``<column>_parsed`` is created.
+
+        Parameters
+        ----------
+        column : str
+            Name of the string column to split.
+        names : list of str, optional
+            Output column names; the column is split positionally on
+            ``separator`` into exactly ``len(names)`` new columns.
+        separator : str, default '_'
+            Split delimiter.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the parsed sub-field columns
+            appended and ``column`` dropped.
         """
         if column not in self._relation.columns:
             raise ValueError(f'explode_index(): unknown column {column!r}')
@@ -2682,7 +2746,27 @@ class DuckJanitor:
                             names_to: str = 'name',
                             values_to: str = 'value',
                             names_sep: Optional[str] = None) -> 'DuckJanitor':
-        """Long-form pivot driven by a column-name spec (R: ``pivot_longer_spec``)."""
+        """Long-form pivot driven by a column-name spec (R: ``pivot_longer_spec``).
+
+        Parameters
+        ----------
+        id_cols : list of str
+            Identifier columns that remain as rows.
+        value_cols : list of str
+            Columns to unpivot.
+        names_to : str, default 'name'
+            Output column holding the unpivoted column names.
+        values_to : str, default 'value'
+            Output column holding the unpivoted cell values.
+        names_sep : str, optional
+            If provided, multi-part column names are split on this
+            separator into multiple ``names_to*`` columns.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, in long format.
+        """
         if not value_cols:
             raise ValueError('pivot_longer_spec(): value_cols must be non-empty')
         missing_vals = [c for c in value_cols if c not in self._relation.columns]
@@ -2721,7 +2805,25 @@ class DuckJanitor:
                             names_from: str,
                             values_from: str,
                             names_glue: str = '_') -> 'DuckJanitor':
-        """Wide pivot driven by a column-name spec (R: ``pivot_wider_spec``)."""
+        """Wide pivot driven by a column-name spec (R: ``pivot_wider_spec``).
+
+        Parameters
+        ----------
+        id_cols : list of str
+            Identifier columns that remain as rows.
+        names_from : str
+            Column whose values become the new column names.
+        values_from : str
+            Column whose values populate the new columns.
+        names_glue : str, default '_'
+            Separator inserted between multi-part names when ``names_from``
+            itself is a derived multi-column.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, in wide format.
+        """
         if names_from not in self._relation.columns:
             raise ValueError(f'pivot_wider_spec(): unknown names_from {names_from!r}')
         if values_from not in self._relation.columns:
@@ -2750,6 +2852,23 @@ class DuckJanitor:
         """Aggregate join (R: ``join_agg``) — left-join with arbitrary aggregations.
 
         ``aggs`` is a dict mapping ``new_col -> ("COL", AGG)``.
+
+        Parameters
+        ----------
+        other : DuckJanitor
+            The right-side relation to join.
+        on : tuple
+            ``(left_col, right_col, op_str)`` describing the conditional
+            join key.
+        aggs : dict
+            ``{new_column_name: (source_column, agg_function)}`` for the
+            right-side aggregations, e.g.
+            ``{'avg_age': ('age', 'AVG')}``.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the joined+aggregated result.
         """
         cur_cols = list(self._relation.columns)
         other_cols = list(other._relation.columns)
@@ -2788,7 +2907,22 @@ class DuckJanitor:
         return DuckJanitor(new_relation, self._connection)
 
     def get_join_indices(self, other: 'DuckJanitor', conditions) -> dict:
-        """Compute join key indices without materialising the join (R: ``get_join_indices``)."""
+        """Compute join key indices without materialising the join (R: ``get_join_indices``).
+
+        Parameters
+        ----------
+        other : DuckJanitor
+            The right-side relation to probe against.
+        conditions : tuple or list of tuple
+            Either a single ``(left_col, right_col, op_str)`` triple or a
+            list of such triples (logical AND across them).
+
+        Returns
+        -------
+        dict
+            ``{'left_indices': [...], 'right_indices': [...]}`` — index
+            arrays that satisfy the join.
+        """
         if not isinstance(other, DuckJanitor):
             raise TypeError('get_join_indices(): other must be a DuckJanitor')
         if isinstance(conditions, tuple) and len(conditions) == 3:
