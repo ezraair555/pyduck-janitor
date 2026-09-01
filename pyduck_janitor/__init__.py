@@ -5,7 +5,7 @@ This package combines the clean API of pyjanitor with the speed and
 scalability of DuckDB for processing large datasets.
 """
 
-from .duck_janitor import DuckJanitor
+from .duck_janitor import DuckJanitor, DropLabel, patterns
 from .cleaning_ops import (
     clean_names,
     remove_columns,
@@ -119,4 +119,7 @@ __all__ = [
     "compare_df_cols",
     "join_apply",
     "process_text",
+    # pyjanitor helper surface (non-chained-verb)
+    "DropLabel",
+    "patterns",
 ]

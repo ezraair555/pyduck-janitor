@@ -5,11 +5,51 @@ This module provides the DuckJanitor class that wraps DuckDB relations
 and provides a method-chaining API for data cleaning operations.
 """
 
+import re as _re_mod
+from dataclasses import dataclass
+
 import pandas as pd
 import duckdb
 from typing import Optional, Union, List, Dict, Any, Callable
 from pathlib import Path
 import re
+
+
+class patterns(str):
+    """pyjanitor-parity regex helper.
+
+    In pyjanitor, ``patterns(regex_pattern)`` converts a string into a
+    compiled regular expression for use in selection DSLs.  We subclass
+    ``str`` so that the compiled pattern can also flow through the
+    ``select_columns`` DSL unchanged, while still being usable directly
+    via ``re.search(patterns('foo'), text)``.
+    """
+
+    @property
+    def compiled(self):
+        return _re_mod.compile(str(self))
+
+    def search(self, text: str):
+        return self.compiled.search(text)
+
+    def match(self, text: str):
+        return self.compiled.match(text)
+
+    def findall(self, text: str):
+        return self.compiled.findall(text)
+
+
+@dataclass
+class DropLabel:
+    """pyjanitor-parity label-drop sentinel for the select DSL.
+
+    Wraps a column label so that ``select_columns`` excludes it from the
+    output, matching pyjanitor's ``DropLabel`` dataclass semantics::
+
+        dj.select_columns([DropLabel('unwanted'), 'keep_me'])
+    """
+
+    label: str
 
 
 class DuckJanitor:
@@ -1285,6 +1325,39 @@ class DuckJanitor:
         """Compare the current relation's columns to other relations (R: ``compare_df_cols_same``)."""
         cur_cols = list(self._relation.columns)
         return all(cur_cols == list(o._relation.columns) for o in others)
+
+    def describe_class(self, strict_description: bool = True) -> pd.DataFrame:
+        """Describe the column types of this relation (pyjanitor ``describe_class`` parity).
+
+        Parameters
+        ----------
+        strict_description : bool, default True
+            When True (default), raise a descriptive ValueError if the
+            relation has no columns.  When False, return an empty frame
+            instead of raising.
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per column with ``column_name`` and ``column_type``.
+        """
+        cur_cols = list(self._relation.columns)
+        if not cur_cols:
+            if strict_description:
+                raise ValueError(
+                    'describe_class(): relation has no columns to describe'
+                )
+            return pd.DataFrame(columns=['column_name', 'column_type'])
+        temp_name = f'_describe_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        rows = self._connection.execute(
+            f'DESCRIBE SELECT * FROM {temp_name}'
+        ).fetchall()
+        self._connection.unregister(temp_name)
+        return pd.DataFrame(
+            [{'column_name': r[0], 'column_type': r[1]} for r in rows],
+            columns=['column_name', 'column_type'],
+        )
 
     # =============================================================
     # pyjanitor parity batch 2 — medium helpers

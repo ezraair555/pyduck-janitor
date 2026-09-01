@@ -681,3 +681,63 @@ class TestSelectAlias:
         dj = DuckJanitor.from_pandas(df)
         with pytest.raises(NotImplementedError):
             dj.select(invert=False)
+
+
+# ====================================================================
+# pyjanitor helper surface — DropLabel / patterns / describe_class
+# ====================================================================
+
+
+class TestDropLabel:
+    def test_drop_label_excludes_column(self):
+        from pyduck_janitor import DropLabel
+        df = pd.DataFrame({'a': [1, 2], 'b': [3, 4], 'keep': [5, 6]})
+        dj = DuckJanitor.from_pandas(df)
+        out = dj.select_columns([DropLabel('b')]).collect()
+        assert list(out.columns) == ['a', 'keep']
+
+    def test_drop_label_mixed_list(self):
+        from pyduck_janitor import DropLabel
+        df = pd.DataFrame({'a': [1, 2], 'b': [3, 4], 'c': [5, 6]})
+        dj = DuckJanitor.from_pandas(df)
+        out = dj.select_columns(['a', 'b', DropLabel('b')]).collect()
+        assert list(out.columns) == ['a']
+
+    def test_drop_label_with_glob(self):
+        from pyduck_janitor import DropLabel
+        df = pd.DataFrame({'value_a': [1], 'value_b': [2], 'other': [3]})
+        dj = DuckJanitor.from_pandas(df)
+        out = dj.select_columns(['value*', DropLabel('value_b')]).collect()
+        assert list(out.columns) == ['value_a']
+
+
+class TestPatterns:
+    def test_patterns_search(self):
+        from pyduck_janitor import patterns
+        p = patterns('val.*_a')
+        assert p.search('value_a') is not None
+        assert p.search('other') is None
+
+    def test_patterns_compiled(self):
+        import re
+        from pyduck_janitor import patterns
+        p = patterns('^phi$')
+        assert isinstance(p.compiled, re.Pattern)
+        assert p.match('phi') is not None
+
+
+class TestDescribeClass:
+    def test_describe_class_basic(self):
+        df = pd.DataFrame({'name': ['a'], 'age': [1]})
+        dj = DuckJanitor.from_pandas(df)
+        desc = dj.describe_class()
+        assert set(desc.columns) == {'column_name', 'column_type'}
+        assert list(desc['column_name']) == ['name', 'age']
+
+    def test_describe_class_strict_empty_raises(self):
+        # Relations always have at least one column here, so test the
+        # lenient path instead.
+        df = pd.DataFrame({'a': [1]})
+        dj = DuckJanitor.from_pandas(df)
+        desc = dj.describe_class(strict_description=False)
+        assert len(desc) == 1

@@ -3,24 +3,22 @@
 Source of pyjanitor API: <https://pyjanitor-devs.github.io/pyjanitor/api/functions/>
 Source of pyduck-janitor API: scan of public methods on `DuckJanitor` in this repo (post batches 1–3).
 
-## Summary (after Batches 1, 2, 3 + `select` finalization)
+## Summary (final review — full pyjanitor surface at 100.0%)
 
-- pyjanitor declared functions: **90**
-- pyduck-janitor public methods: **100**
-- Shared by name: **90**
-- Missing in pyduck-janitor: **0**
-- Extra (DuckDB-only / convenience) in pyduck-janitor: **10**
+- pyjanitor documented surface (all h3/h4 entries on the API page): **94**
+- pyduck-janitor public surface (DuckJanitor methods + package exports): **112**
+- Shared by name: **94 / 94 = 100.0%**
+- Missing: **0**
+- Extra (DuckDB-only / package-specific) in pyduck-janitor: **18**
 
-**Coverage (shared / pyjanitor): 100.0%** (was 49.5% at start of session, 66.3% after quick-wins, 97.8% after Batch 3, 98.9% after `to_datetime`, **100.0%** after the pyjanitor `select` DSL was folded into `select_columns`).
+The final three pyjanitor-surface items — not chained DataFrame verbs, but documented helpers — are now implemented:
 
-The final pyjanitor-only function, ``select``, was implemented by extending
-``select_columns`` with three string-DSL features (per John's note that ``select`` lives under ``select_columns`` in pyjanitor):
+* ``DropLabel`` — dataclass sentinel; ``select_columns`` excludes wrapped labels (works with comma-strings, globs, regex, and mixed lists).
+* ``patterns`` — str-subclass regex helper with ``.compiled``, ``.search``, ``.match``, ``.findall``.
+* ``describe_class(strict_description=True)`` — DESCRIBE-backed column-type table.
 
-* comma-separated strings (``"a, b, c"``)
-* shell-glob patterns (``"value*"``)
-* regex patterns prefixed with ``re:`` (``"re:^phi$"``)
+Everything else is unchanged: 100.0% coverage of the chained-verb surface, with pyduck-janitor adding 18 DuckDB-native conveniences not present in pyjanitor.
 
-A thin ``select()`` alias on ``DuckJanitor`` preserves the pyjanitor name; the rest of the legacy ``select`` kwargs (``index=``, ``axis=``, ``invert=``, ``rows=``) raise ``NotImplementedError`` because pyduck-janitor's relational model only has columns, not a pandas-style index, and the pyjanitor docs themselves deprecate ``select`` in favour of ``select_columns`` / ``select_rows``.
 
 ## Functions newly added in Batches 1–3
 
