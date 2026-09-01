@@ -77,7 +77,13 @@ class DuckJanitor:
 
     @classmethod
     def get_shared_connection(cls) -> duckdb.DuckDBPyConnection:
-        """Get or create the global shared DuckDB connection."""
+        """Get or create the global shared DuckDB connection.
+
+        Returns
+        -------
+        duckdb.DuckDBPyConnection
+            The shared in-memory DuckDB connection, lazily created on first call.
+        """
         if cls._shared_conn is None:
             cls._shared_conn = duckdb.connect()
         return cls._shared_conn
@@ -725,7 +731,13 @@ class DuckJanitor:
         return DuckJanitor(new_relation, self._connection)
     
     def drop_constant_columns(self) -> 'DuckJanitor':
-        """Remove columns that have only one unique value."""
+        """Remove columns that have only one unique value.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining.
+        """
         from .cleaning_ops_extended import drop_constant_columns as _drop_constant_columns
         new_relation = _drop_constant_columns(self._relation, self._connection)
         return DuckJanitor(new_relation, self._connection)
@@ -891,7 +903,13 @@ class DuckJanitor:
         return DuckJanitor(new_relation, self._connection)
 
     def drop_duplicate_columns(self) -> 'DuckJanitor':
-        """Remove columns that are exact duplicates of other columns."""
+        """Remove columns that are exact duplicates of other columns.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining.
+        """
         from .cleaning_ops_final import drop_duplicate_columns as _drop_duplicate_columns
         new_relation = _drop_duplicate_columns(self._relation, self._connection)
         return DuckJanitor(new_relation, self._connection)
@@ -994,6 +1012,11 @@ class DuckJanitor:
             One of {'seconds', 'milliseconds', 'microseconds'}.
         target_column : str, optional
             Name of the output column. Defaults to ``column + '_datetime'``.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the new TIMESTAMP column appended.
         """
         out = target_column or f'{column}_datetime'
         multipliers = {'seconds': 1, 'milliseconds': 1000, 'microseconds': 1000000}
@@ -1163,7 +1186,13 @@ class DuckJanitor:
         return DuckJanitor(new_relation, self._connection)
 
     def get_index_labels(self) -> List[str]:
-        """Return the current column names as a list (label-only)."""
+        """Return the current column names as a list (label-only).
+
+        Returns
+        -------
+        list of str
+            Column labels in the current DuckDB relation, in order.
+        """
         return list(self._relation.columns)
 
     @staticmethod
@@ -1194,6 +1223,11 @@ class DuckJanitor:
             If provided, drives DuckDB's ``random()`` PRNG for reproducibility.
             The seed is normalized into ``[-1.0, 1.0]`` because DuckDB's
             ``setseed`` only accepts that range.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining.
         """
         if seed is not None:
             normalized = (abs(int(seed)) % (2 ** 31)) / (2 ** 31)
@@ -1377,6 +1411,12 @@ class DuckJanitor:
         reset_index : bool, default False
             Kept for signature parity; DuckDB relations have no integer
             index to reset.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the chosen row lifted into the
+            column headers.
         """
         if row_number < 0:
             raise ValueError(f'row_to_names(): row_number must be >= 0; got {row_number}')
@@ -1415,6 +1455,11 @@ class DuckJanitor:
         Implementation uses a CTE chain that hashes all columns on each row
         and uses ``CONDITIONAL_TRUE_EVENT`` (via a stale flag) to break the
         run-length counter when the hash changes.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with an extra ``_rle_id`` column.
         """
         temp_name = f'_rle_{id(self._relation)}'
         self._connection.register(temp_name, self._relation)
@@ -1736,6 +1781,11 @@ class DuckJanitor:
             Examples::
 
                 {'avg_age': ('age', 'AVG'), 'n': ('*', 'COUNT')}
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the aggregated columns appended.
         """
         agg_spec = agg_spec or {}
         cur_cols = list(self._relation.columns)

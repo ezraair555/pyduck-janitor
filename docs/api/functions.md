@@ -459,6 +459,11 @@ Get or create the global shared DuckDB connection.
 get_shared_connection() -> _duckdb.DuckDBPyConnection
 ```
 
+**Returns**
+
+duckdb.DuckDBPyConnection
+The shared in-memory DuckDB connection, lazily created on first call.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -1070,6 +1075,11 @@ Remove columns that have only one unique value.
 drop_constant_columns(self) -> 'DuckJanitor'
 ```
 
+**Returns**
+
+DuckJanitor
+Self for method chaining.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -1330,6 +1340,11 @@ convert_unix_date(self, column: str, unit: str = 'seconds', target_column: Optio
   One of {'seconds', 'milliseconds', 'microseconds'}.
 - **target_column** — str, optional
   Name of the output column. Defaults to ``column + '_datetime'``.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the new TIMESTAMP column appended.
 
 **Example** *(from verified snippet)*
 
@@ -1799,6 +1814,11 @@ Remove columns that are exact duplicates of other columns.
 drop_duplicate_columns(self) -> 'DuckJanitor'
 ```
 
+**Returns**
+
+DuckJanitor
+Self for method chaining.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -1984,6 +2004,11 @@ Return the current column names as a list (label-only).
 get_index_labels(self) -> List[str]
 ```
 
+**Returns**
+
+list of str
+Column labels in the current DuckDB relation, in order.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -2011,6 +2036,12 @@ row_to_names(self, row_number: int = 0, remove_row: bool = True, reset_index: bo
 - **reset_index** — bool, default False
   Kept for signature parity; DuckDB relations have no integer
   index to reset.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the chosen row lifted into the
+column headers.
 
 **Example** *(from verified snippet)*
 
@@ -2147,6 +2178,11 @@ summarise(self, group_by: Optional[List[str]] = None, agg_spec: Optional[dict] =
   Examples::
   {'avg_age': ('age', 'AVG'), 'n': ('*', 'COUNT')}
 
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the aggregated columns appended.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -2244,6 +2280,11 @@ run-length counter when the hash changes.
 ```python
 rle_id(self) -> 'DuckJanitor'
 ```
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with an extra ``_rle_id`` column.
 
 **Example** *(from verified snippet)*
 
@@ -2368,6 +2409,11 @@ shuffle(self, seed: Optional[int] = None) -> 'DuckJanitor'
   If provided, drives DuckDB's ``random()`` PRNG for reproducibility.
   The seed is normalized into ``[-1.0, 1.0]`` because DuckDB's
   ``setseed`` only accepts that range.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining.
 
 **Example** *(from verified snippet)*
 
