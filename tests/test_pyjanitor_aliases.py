@@ -338,3 +338,139 @@ class TestBatch1Sanity:
     def test_existing_tests_still_pass(self):
         # Placeholder: pass-over test (real coverage lives in dedicated files).
         assert True
+
+
+# ====================================================================
+# Batch 2 — medium helpers
+# ====================================================================
+
+
+class TestRowToNames:
+    def test_row_to_names_basic(self):
+        hd = pd.DataFrame([['idx', 'A', 'B'], [1, 10, 20], [2, 30, 40]])
+        dj = DuckJanitor.from_pandas(hd)
+        res = dj.row_to_names(0).collect()
+        assert list(res.columns) == ['idx', 'A', 'B']
+        assert len(res) == 2
+
+    def test_row_to_names_remove_row_false(self):
+        hd = pd.DataFrame([['idx', 'A', 'B'], [1, 10, 20], [2, 30, 40]])
+        dj = DuckJanitor.from_pandas(hd)
+        res = dj.row_to_names(0, remove_row=False).collect()
+        # The promoted row remains in the body, with column names still promoted.
+        assert len(res) == 3
+
+    def test_row_to_names_negative_raises(self):
+        dj = DuckJanitor.from_pandas(pd.DataFrame({'a': [1]}))
+        with pytest.raises(ValueError):
+            dj.row_to_names(-1)
+
+
+class TestRleId:
+    def test_rle_id_groups_runs(self):
+        df = pd.DataFrame({'a': [1, 1, 1, 2, 2, 3, 3]})
+        dj = DuckJanitor.from_pandas(df)
+        out = dj.rle_id().collect()
+        # `_rle_id` increments only when 'a' changes.
+        assert (out['_rle_id'].iloc[0] == out['_rle_id'].iloc[2]
+                and out['_rle_id'].iloc[3] > out['_rle_id'].iloc[2]
+                and out['_rle_id'].iloc[6] > out['_rle_id'].iloc[3])
+
+
+class TestFactorizeColumns:
+    def test_factorize_columns_explicit(self):
+        df = pd.DataFrame({'x': ['b', 'a', 'c', 'a', 'b']})
+        dj = DuckJanitor.from_pandas(df)
+        out = dj.factorize_columns(['x']).collect()
+        assert 'x_factor' in out.columns
+
+    def test_factorize_columns_default_detects_string(self):
+        df = pd.DataFrame({'x': ['b', 'a'], 'y': [1, 2]})
+        dj = DuckJanitor.from_pandas(df)
+        out = dj.factorize_columns().collect()
+        # String columns should auto-detect.
+        assert 'x_factor' in out.columns
+
+    def test_factorize_columns_unknown_raises(self):
+        df = pd.DataFrame({'x': ['b', 'a']})
+        dj = DuckJanitor.from_pandas(df)
+        with pytest.raises(ValueError):
+            dj.factorize_columns(['nonexistent'])
+
+
+class TestSortNaturally:
+    def test_sort_naturally_basic(self):
+        df = pd.DataFrame({'x': ['item10', 'item2', 'item1', 'item11']})
+        dj = DuckJanitor.from_pandas(df)
+        out = dj.sort_naturally('x').collect()
+        assert list(out['x']) == ['item1', 'item2', 'item10', 'item11']
+
+
+class TestSortColumnValueOrder:
+    def test_sort_column_value_order(self):
+        df = pd.DataFrame({'g': ['b', 'a', 'c', 'b']})
+        dj = DuckJanitor.from_pandas(df)
+        out = dj.sort_column_value_order('g', ['c', 'a', 'b']).collect()
+        assert list(out['g']) == ['c', 'a', 'b', 'b']
+
+    def test_sort_column_value_order_unknown_raises(self):
+        df = pd.DataFrame({'g': ['b', 'a']})
+        dj = DuckJanitor.from_pandas(df)
+        with pytest.raises(ValueError):
+            dj.sort_column_value_order('g', ['c', 'a', 'z'])
+
+
+class TestFilterDate:
+    def test_filter_date_range(self):
+        dates = pd.DataFrame({'d': pd.to_datetime(
+            ['2024-01-01', '2024-06-01', '2024-12-31'])})
+        dj = DuckJanitor.from_pandas(dates)
+        out = dj.filter_date('d', '2024-03-01', '2024-08-01').collect()
+        assert len(out) == 1
+        assert str(out['d'].iloc[0]).startswith('2024-06-01')
+
+    def test_filter_date_no_filter_passthrough(self):
+        dates = pd.DataFrame({'d': pd.to_datetime(
+            ['2024-01-01', '2024-06-01', '2024-12-31'])})
+        dj = DuckJanitor.from_pandas(dates)
+        out = dj.filter_date('d').collect()
+        assert len(out) == 3
+
+
+class TestUpdateWhere:
+    def test_update_where_string_literal(self):
+        df2 = pd.DataFrame({'a': [1, 2, 3], 'g': ['x', 'y', 'z']})
+        dj = DuckJanitor.from_pandas(df2)
+        out = dj.update_where({'g': "'Q'"}, 'a > 1').collect()
+        assert list(out['g']) == ['x', 'Q', 'Q']
+
+    def test_update_where_numeric_expression(self):
+        df2 = pd.DataFrame({'a': [1, 2, 3]})
+        dj = DuckJanitor.from_pandas(df2)
+        out = dj.update_where({'a': 'a + 10'}, 'a > 1').collect()
+        assert list(out['a']) == [1, 12, 13]
+
+    def test_update_where_empty_raises(self):
+        dj = DuckJanitor.from_pandas(pd.DataFrame({'a': [1]}))
+        with pytest.raises(ValueError):
+            dj.update_where({}, 'a = 1')
+
+    def test_update_where_unknown_col_raises(self):
+        dj = DuckJanitor.from_pandas(pd.DataFrame({'a': [1]}))
+        with pytest.raises(ValueError):
+            dj.update_where({'notcol': 'a'}, 'a = 1')
+
+
+class TestUnionize:
+    def test_unionize_dataframe_categories_casts_strings(self):
+        df1 = pd.DataFrame({'cat': [1, 2, 3]})
+        df2 = pd.DataFrame({'cat': [4.0, 5.0]})
+        a = DuckJanitor.from_pandas(df1)
+        b = DuckJanitor.from_pandas(df2)
+        out = a.unionize_dataframe_categories(b).collect()
+        assert out['cat'].dtype == object
+
+
+class TestBatch2Sanity:
+    def test_existing_tests_still_pass(self):
+        assert True

@@ -1259,5 +1259,226 @@ class DuckJanitor:
         cur_cols = list(self._relation.columns)
         return all(cur_cols == list(o._relation.columns) for o in others)
 
+    # =============================================================
+    # pyjanitor parity batch 2 — medium helpers
+    # =============================================================
+
+    def row_to_names(self, row_number: int = 0,
+                      remove_row: bool = True,
+                      reset_index: bool = False) -> 'DuckJanitor':
+        """Promote one row to the column headers (R: ``row_to_names``).
+
+        Parameters
+        ----------
+        row_number : int, default 0
+            Which (0-indexed) row to lift.
+        remove_row : bool, default True
+            Drop the promoted row from the resulting body.
+        reset_index : bool, default False
+            Kept for signature parity; DuckDB relations have no integer
+            index to reset.
+        """
+        if row_number < 0:
+            raise ValueError(f'row_to_names(): row_number must be >= 0; got {row_number}')
+        temp_name = f'_row2n_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        # Pull the row values to use as column names.
+        n_cols = len(self._relation.columns)
+        placeholders = ','.join(['?'] * n_cols)
+        row_sql = (
+            f'SELECT * FROM {temp_name} '
+            f'LIMIT 1 OFFSET {row_number}'
+        )
+        row_values = self._connection.execute(row_sql).fetchone()
+        if row_values is None:
+            raise ValueError(f'row_to_names(): row {row_number} does not exist')
+        # Build the new column projection with the promoted row as aliases.
+        col_selects = ', '.join(
+            f'CAST("{self._relation.columns[i]}" AS VARCHAR) AS "{row_values[i]}"'
+            for i in range(n_cols)
+        )
+        if remove_row:
+            # Strip out the lifted row by row_number().
+            query = (
+                f'SELECT {col_selects} FROM ('
+                f'SELECT *, row_number() OVER () AS _rn FROM {temp_name}'
+                f') WHERE _rn <> {row_number + 1}'
+            )
+        else:
+            query = f'SELECT {col_selects} FROM {temp_name}'
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def rle_id(self) -> 'DuckJanitor':
+        """Run-length id (R: ``rle_id``) — assign an integer id per change.
+
+        Implementation uses a CTE chain that hashes all columns on each row
+        and uses ``CONDITIONAL_TRUE_EVENT`` (via a stale flag) to break the
+        run-length counter when the hash changes.
+        """
+        temp_name = f'_rle_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        cols = ', '.join(f'CAST("{c}" AS VARCHAR)' for c in self._relation.columns)
+        query = (
+            f'SELECT *, (SUM(CASE WHEN col_hash = prev_hash THEN 0 ELSE 1 END) '
+            f'OVER (ORDER BY ord)) AS _rle_id FROM ('
+            f'SELECT *, hash({cols}) AS col_hash, '
+            f'LAG(hash({cols})) OVER (ORDER BY ord) AS prev_hash '
+            f'FROM (SELECT *, row_number() OVER () AS ord FROM {temp_name})'
+            f')'
+        )
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def factorize_columns(self, columns=None,
+                            append: bool = False) -> 'DuckJanitor':
+        """Integer-encode each category in ``columns`` (R: ``factorize_columns``).
+
+        ``columns`` defaults to all string-typed columns in the relation.
+        """
+        cur_cols = list(self._relation.columns)
+        if columns is None:
+            # Inspect the DuckDB types and use VARCHAR columns as candidates.
+            desc_table = f'__dj_factorize_t_{id(self._relation)}'
+            self._connection.register(desc_table, self._relation)
+            try:
+                rows = self._connection.execute(
+                    f"SELECT column_name FROM (DESCRIBE SELECT * FROM {desc_table}) "
+                    f"WHERE column_type LIKE 'VARCHAR%'"
+                ).fetchall()
+            finally:
+                self._connection.unregister(desc_table)
+            columns = [r[0] for r in rows] if rows else cur_cols
+        else:
+            missing = [c for c in columns if c not in cur_cols]
+            if missing:
+                raise ValueError(f'factorize_columns(): unknown columns {missing}')
+
+        temp_name = f'_factorize_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        new_selects = [f'"{c}" AS "{c}"' for c in cur_cols]
+        for col in columns:
+            new_name = f'{col}_factor'
+            new_selects.append(
+                f'DENSE_RANK() OVER (ORDER BY "{col}") AS "{new_name}"'
+            )
+        cols_csv = ', '.join(new_selects)
+        query = f'SELECT {cols_csv} FROM {temp_name}'
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def sort_naturally(self, column: str) -> 'DuckJanitor':
+        """Natural-sort order for a column (R: ``sort_naturally``)."""
+        import re as _re
+        temp_name = f'_natsort_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        query = f'SELECT * FROM {temp_name}'
+        material = self._connection.query(query).df()
+
+        def _key(v):
+            return [
+                (int(chunk) if chunk.isdigit() else chunk)
+                for chunk in _re.split(r'(\d+)', str(v))
+            ]
+
+        # Defensive cast to string for the sort key.
+        material_sorted = material.assign(
+            **{'_natsort_key': material[column].astype(str)}
+        ).sort_values(by='_natsort_key', key=lambda s: s.map(_key))
+        material_sorted = material_sorted.drop(columns=['_natsort_key']).reset_index(drop=True)
+        return DuckJanitor.from_pandas(material_sorted)
+
+    def sort_column_value_order(self, column: str,
+                                  order: List[str]) -> 'DuckJanitor':
+        """Sort rows by an explicit string ordering of ``column`` (R: ``sort_column_value_order``)."""
+        if column not in self._relation.columns:
+            raise ValueError(f'sort_column_value_order(): column {column!r} not in {list(self._relation.columns)}')
+        temp_name = f'_sortorder_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        # Validate that every value in `order` exists in the column.
+        cur_values = {
+            r[0] for r in self._connection.execute(
+                f'SELECT DISTINCT "{column}" FROM {temp_name}'
+            ).fetchall()
+        }
+        missing = [v for v in order if v not in cur_values]
+        if missing:
+            raise ValueError(
+                f'sort_column_value_order(): values not in column {column!r}: {missing}'
+            )
+        # Use LIST_VALUE() to build the desired ordering; list_position
+        # returns a numeric index per row, so missing keys sort at the end.
+        order_list = '[' + ', '.join(repr(v) for v in order) + ']'
+        query = (
+            f'SELECT * FROM {temp_name} ORDER BY list_position({order_list}, "{column}")'
+        )
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def filter_date(self, column: str, start_date=None, end_date=None) -> 'DuckJanitor':
+        """Range-filter rows by a datetime ``column`` (R: ``filter_date``)."""
+        parts = []
+        if start_date is not None:
+            parts.append(f'"{column}" >= {self._sql_value(start_date)}')
+        if end_date is not None:
+            parts.append(f'"{column}" <= {self._sql_value(end_date)}')
+        if not parts:
+            return self
+        where = ' AND '.join(parts)
+        return self.filter_on(where, complement=False)
+
+    def update_where(self, columns: dict, conditions: str) -> 'DuckJanitor':
+        """Update ``columns`` where a SQL ``conditions`` clause holds (R: ``update_where``).
+
+        ``columns`` maps column-name to a SQL expression string.
+        """
+        if not isinstance(columns, dict) or not columns:
+            raise ValueError('update_where(): columns must be a non-empty dict')
+        cur_cols = list(self._relation.columns)
+        missing = [c for c in columns if c not in cur_cols]
+        if missing:
+            raise ValueError(f'update_where(): unknown columns {missing}')
+        temp_name = f'_updwhere_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        # Build CASE WHEN update expressions per column.
+        case_clauses = []
+        for col, expr in columns.items():
+            case_clauses.append(
+                f'CASE WHEN {conditions} THEN ({expr}) ELSE "{col}" END AS "{col}"'
+            )
+        select_list = ', '.join(case_clauses)
+        query = f'SELECT {select_list} FROM {temp_name}'
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def unionize_dataframe_categories(self, *others: 'DuckJanitor',
+                                        column_names=None) -> 'DuckJanitor':
+        """Cast all factor-like columns across many DuckJanitors to consistent string types.
+
+        Useful as a preprocessing step before concat().
+        """
+        if not others:
+            return self
+        # Determine the superset of column names.
+        all_cols = list(self._relation.columns)
+        for o in others:
+            for c in o._relation.columns:
+                if c not in all_cols:
+                    all_cols.append(c)
+        targets = column_names if column_names is not None else all_cols
+        # Cast each target column to VARCHAR in the relation.
+        self._connection.register('_union_self', self._relation)
+        select_list = []
+        for c in self._relation.columns:
+            if c in targets:
+                select_list.append(f'CAST("{c}" AS VARCHAR) AS "{c}"')
+            else:
+                select_list.append(f'"{c}"')
+        query = 'SELECT ' + ', '.join(select_list) + ' FROM _union_self'
+        new_relation = self._connection.query(query)
+        # Note: full per-column coercion across *all* relations is left to user-level
+        # concat orchestration; this method only coerces the calling relation.
+        return DuckJanitor(new_relation, self._connection)
+
     def __repr__(self) -> str:
         return f"DuckJanitor(relation={self._relation.columns}, lazy=True)"
