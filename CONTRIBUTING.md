@@ -70,3 +70,37 @@ Include:
 ## Code of Conduct
 
 This project follows [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+## CI Contract (added 2026-09-01)
+
+Three jobs run on every PR:
+
+- **`lint`** — `ruff check` + `ruff format --check` on `pyduck_janitor/`, `scripts/`, `tests/`. Run locally with `ruff check . && ruff format --check .`. This job is **blocking** (failures prevent merge) — pre-existing style issues were cleared on 2026-09-01.
+- **`test`** — pytest on Python 3.10, 3.11, 3.12 with DuckDB and pandas pinned to known-good versions. Stops on first failure with full traceback; on failure the log is uploaded as an artifact.
+- **`review-agent`** — Runs `scripts/ci_review.py` and posts a comment on the PR with:
+  1. **Module map** — every public symbol with its one-line docstring
+  2. **API surface diff** — symbols added/removed vs. the PR base
+  3. **Docstring coverage** — % of public symbols with full `Parameters` + `Returns` sections
+
+The bot comment updates in place on every push; no need to dismiss or delete it.
+
+### Running the review locally
+
+```bash
+python3 scripts/ci_review.py --dry-run --base-ref main
+```
+
+This prints the same markdown that CI would post. Use it to verify the diff and coverage before pushing.
+
+### Docstring convention
+
+Public symbols must have a NumPy-style docstring with `Parameters` and `Returns` sections. The `review-agent` job surfaces incomplete coverage in its PR comment; if a PR drops coverage, fix it before merging.
+
+### Adding a new public function
+
+1. Define it in the appropriate `cleaning_ops*.py` or `duck_janitor.py` module.
+2. Re-export from `pyduck_janitor/__init__.py` if users should access it as `pyduck_janitor.foo`.
+3. Add the name to `__all__` in `pyduck_janitor/__init__.py` so the `review-agent` job picks it up.
+4. Write a full `Parameters` / `Returns` docstring.
+
+The `review-agent` job will surface missing exports and missing docstrings automatically.
