@@ -1409,13 +1409,38 @@ class DuckJanitor:
         return DuckJanitor(new_relation, self._connection)
     
     def also(self, func: Callable) -> 'DuckJanitor':
-        """Apply a Python function with side effects (materializes data)."""
+        """Apply a Python function with side effects (materializes data).
+
+        Parameters
+        ----------
+        func : Callable
+            Function called with the materialized pandas DataFrame; its
+            return value is ignored.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining (post-materialization).
+        """
         from .cleaning_ops_final import also as _also
         result = _also(self, func)
         return result
     
     def alias(self, alias: Union[str, Callable]) -> 'DuckJanitor':
-        """Rename all columns using a string or callable."""
+        """Rename all columns using a string or callable.
+
+        Parameters
+        ----------
+        alias : str or Callable
+            Either a ``str.format`` template (``'col_{}'``) applied to
+            each column, or a callable that maps an old column name to
+            a new one.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with renamed columns.
+        """
         from .cleaning_ops_final import alias as _alias
         new_relation = _alias(self._relation, alias, self._connection)
         return DuckJanitor(new_relation, self._connection)
@@ -1433,24 +1458,83 @@ class DuckJanitor:
         return DuckJanitor(new_relation, self._connection)
 
     def compare_df_cols(self, other: 'DuckJanitor') -> pd.DataFrame:
-        """Compare columns between two DuckJanitor instances."""
+        """Compare columns between two DuckJanitor instances.
+
+        Parameters
+        ----------
+        other : DuckJanitor
+            The right-side relation to compare against.
+
+        Returns
+        -------
+        pd.DataFrame
+            Per-column metadata (name, dtype, presence in either side)
+            showing where the two relations overlap or differ.
+        """
         from .cleaning_ops_final import compare_df_cols as _compare_df_cols
         return _compare_df_cols(self, other, self._connection)
 
     def join_apply(self, other: 'DuckJanitor', on: Union[str, List[str]],
                    func: Callable, new_column_name: str) -> 'DuckJanitor':
-        """Perform join then apply Python function to each row."""
+        """Perform join then apply Python function to each row.
+
+        Parameters
+        ----------
+        other : DuckJanitor
+            The right-side relation to join.
+        on : str or list of str
+            Join key(s).
+        func : Callable
+            Python function applied to each joined row's pandas DataFrame;
+            must return a scalar or array of the same length.
+        new_column_name : str
+            Name of the appended output column.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with ``new_column_name`` added.
+        """
         from .cleaning_ops_final import join_apply as _join_apply
         return _join_apply(self, other, on, func, new_column_name, self._connection)
 
     def process_text(self, column: str, func: Union[Callable, str],
                      new_column_name: str) -> 'DuckJanitor':
-        """Apply text processing function to a column."""
+        """Apply text processing function to a column.
+
+        Parameters
+        ----------
+        column : str
+            Name of the source string column.
+        func : Callable or str
+            Either a Python callable applied row-wise (cell → cell) or a
+            SQL ``str`` expression (``LOWER(column)``).
+        new_column_name : str
+            Name of the appended output column.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with ``new_column_name`` added.
+        """
         from .cleaning_ops_final import process_text as _process_text
         return _process_text(self, column, func, new_column_name, self._connection)
     
     def mutate(self, **kwargs: Any) -> 'DuckJanitor':
-        """Create or modify columns using a dictionary (convenience wrapper)."""
+        """Create or modify columns using a dictionary (convenience wrapper).
+
+        Parameters
+        ----------
+        **kwargs
+            Mapping of ``column=value`` or ``column=callable``. Each value
+            is broadcast as a new column or applied row-wise as a
+            transformation.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the new/modified columns.
+        """
         from .cleaning_ops_final import mutate as _mutate
         result = _mutate(self, **kwargs)
         return result
@@ -1784,6 +1868,16 @@ class DuckJanitor:
 
         ``assign`` accepts keyword arguments of ``column=value`` or
         ``column=callable``, exactly like :meth:`mutate`.
+
+        Parameters
+        ----------
+        **kwargs
+            Forwarded verbatim to :meth:`mutate`.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the new/modified columns.
         """
         return self.mutate(**kwargs)
 
@@ -1792,11 +1886,35 @@ class DuckJanitor:
 
         DuckDB relations are inherently ungrouped; this is a no-op that
         simply returns the current DuckJanitor, kept as a chainable verb.
+
+        Parameters
+        ----------
+        *groups
+            Accepted for signature parity; ignored.
+        **kwargs
+            Accepted for signature parity; ignored.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining (unmodified).
         """
         return self
 
     def get_columns(self, *names) -> 'DuckJanitor':
-        """Select columns by name (alias of :meth:`select_columns`)."""
+        """Select columns by name (alias of :meth:`select_columns`).
+
+        Parameters
+        ----------
+        *names
+            Column names as variadic positional args (mirrors the
+            pyjanitor plural signature).
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, restricted to ``names``.
+        """
         return self.select_columns(list(names))
 
     def move(self, source: str, target: str, position: str = 'before',
@@ -1804,6 +1922,22 @@ class DuckJanitor:
         """Move ``source`` column relative to ``target`` column.
 
         position: ``'before'`` (default) or ``'after'``.
+
+        Parameters
+        ----------
+        source : str
+            Column to move.
+        target : str
+            Anchor column; ``source`` lands before or after it.
+        position : str, default 'before'
+            ``'before'`` or ``'after'`` the ``target``.
+        **kwargs
+            Accepted for signature parity; ignored.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with ``source`` repositioned.
         """
         cur_cols = list(self._relation.columns)
         if source not in cur_cols or target not in cur_cols:
@@ -1828,6 +1962,18 @@ class DuckJanitor:
 
         Columns not listed are dropped (matching pyjanitor's behaviour,
         where columns must be enumerated fully).
+
+        Parameters
+        ----------
+        new_order : list of str
+            Column names in the desired order; any column not in the list
+            is dropped.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the reordered (and possibly
+            subset) column set.
         """
         cur = list(self._relation.columns)
         missing = [c for c in new_order if c not in cur]
@@ -2038,7 +2184,20 @@ class DuckJanitor:
         return out
 
     def compare_df_cols_same(self, *others: 'DuckJanitor') -> bool:
-        """Compare the current relation's columns to other relations (R: ``compare_df_cols_same``)."""
+        """Compare the current relation's columns to other relations (R: ``compare_df_cols_same``).
+
+        Parameters
+        ----------
+        *others : DuckJanitor
+            One or more relations to compare against; all must have
+            exactly the same column list as ``self``.
+
+        Returns
+        -------
+        bool
+            ``True`` if every ``others`` entry has identical columns to
+            ``self``, otherwise ``False``.
+        """
         cur_cols = list(self._relation.columns)
         return all(cur_cols == list(o._relation.columns) for o in others)
 

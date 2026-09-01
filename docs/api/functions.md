@@ -2397,6 +2397,17 @@ Apply a Python function with side effects (materializes data).
 also(self, func: Callable) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **func** — Callable
+  Function called with the materialized pandas DataFrame; its
+  return value is ignored.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining (post-materialization).
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -2415,6 +2426,18 @@ Rename all columns using a string or callable.
 alias(self, alias: Union[str, Callable]) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **alias** — str or Callable
+  Either a ``str.format`` template (``'col_{}'``) applied to
+  each column, or a callable that maps an old column name to
+  a new one.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with renamed columns.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -2432,6 +2455,18 @@ Create or modify columns using a dictionary (convenience wrapper).
 ```python
 mutate(self, **kwargs: Any) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **kwargs**
+  Mapping of ``column=value`` or ``column=callable``. Each value
+  is broadcast as a new column or applied row-wise as a
+  transformation.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the new/modified columns.
 
 **Example** *(from verified snippet)*
 
@@ -2454,6 +2489,16 @@ Alias of :meth:`mutate` matching pyjanitor's name.
 assign(self, **kwargs) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **kwargs**
+  Forwarded verbatim to :meth:`mutate`.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the new/modified columns.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -2474,6 +2519,18 @@ simply returns the current DuckJanitor, kept as a chainable verb.
 ```python
 ungroup(self, *groups, **kwargs) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **groups**
+  Accepted for signature parity; ignored.
+- **kwargs**
+  Accepted for signature parity; ignored.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining (unmodified).
 
 **Example** *(from verified snippet)*
 
@@ -2516,6 +2573,17 @@ Compare columns between two DuckJanitor instances.
 compare_df_cols(self, other: 'DuckJanitor') -> pandas.core.frame.DataFrame
 ```
 
+**Parameters**
+
+- **other** — DuckJanitor
+  The right-side relation to compare against.
+
+**Returns**
+
+pd.DataFrame
+Per-column metadata (name, dtype, presence in either side)
+showing where the two relations overlap or differ.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -2536,6 +2604,18 @@ Compare the current relation's columns to other relations (R: ``compare_df_cols_
 compare_df_cols_same(self, *others: 'DuckJanitor') -> bool
 ```
 
+**Parameters**
+
+- ***others** — DuckJanitor
+  One or more relations to compare against; all must have
+  exactly the same column list as ``self``.
+
+**Returns**
+
+bool
+``True`` if every ``others`` entry has identical columns to
+``self``, otherwise ``False``.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -2555,6 +2635,23 @@ Perform join then apply Python function to each row.
 join_apply(self, other: 'DuckJanitor', on: Union[str, List[str]], func: Callable, new_column_name: str) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **other** — DuckJanitor
+  The right-side relation to join.
+- **on** — str or list of str
+  Join key(s).
+- **func** — Callable
+  Python function applied to each joined row's pandas DataFrame;
+  must return a scalar or array of the same length.
+- **new_column_name** — str
+  Name of the appended output column.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with ``new_column_name`` added.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -2573,6 +2670,21 @@ Apply text processing function to a column.
 ```python
 process_text(self, column: str, func: Union[Callable, str], new_column_name: str) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **column** — str
+  Name of the source string column.
+- **func** — Callable or str
+  Either a Python callable applied row-wise (cell → cell) or a
+  SQL ``str`` expression (``LOWER(column)``).
+- **new_column_name** — str
+  Name of the appended output column.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with ``new_column_name`` added.
 
 **Example** *(from verified snippet)*
 
@@ -2626,6 +2738,22 @@ position: ``'before'`` (default) or ``'after'``.
 move(self, source: str, target: str, position: str = 'before', **kwargs) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **source** — str
+  Column to move.
+- **target** — str
+  Anchor column; ``source`` lands before or after it.
+- **position** — str, default 'before'
+  ``'before'`` or ``'after'`` the ``target``.
+- **kwargs**
+  Accepted for signature parity; ignored.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with ``source`` repositioned.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -2647,6 +2775,18 @@ where columns must be enumerated fully).
 reorder_columns(self, new_order) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **new_order** — list of str
+  Column names in the desired order; any column not in the list
+  is dropped.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the reordered (and possibly
+subset) column set.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -2664,6 +2804,17 @@ Select columns by name (alias of :meth:`select_columns`).
 ```python
 get_columns(self, *names) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **names**
+  Column names as variadic positional args (mirrors the
+  pyjanitor plural signature).
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, restricted to ``names``.
 
 **Example** *(from verified snippet)*
 
