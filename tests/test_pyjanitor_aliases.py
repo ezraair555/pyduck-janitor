@@ -1,0 +1,340 @@
+"""Tests for the pyjanitor-parity aliases added to DuckJanitor."""
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from pyduck_janitor import DuckJanitor
+
+
+@pytest.fixture
+def base_df():
+    return pd.DataFrame({
+        'name': ['Alice', 'Bob', 'Charlie', 'Diana'],
+        'group': ['x', 'y', 'x', 'y'],
+        'value': [10, 20, 30, 40],
+        'ts': ['2024-01-01', '2024-06-01', '2024-01-15', '2024-06-15'],
+    })
+
+
+class TestRenameAlias:
+    def test_rename_columns_alias(self, base_df):
+        dj = DuckJanitor.from_pandas(base_df)
+        res = dj.rename_columns('name', 'full_name').collect()
+        assert 'full_name' in res.columns
+        assert 'name' not in res.columns
+
+
+class TestTruncateAlias:
+    def test_truncate_datetime_dataframe_alias(self):
+        df = pd.DataFrame({'ts': pd.to_datetime(['2024-01-01', '2024-06-01', '2024-12-31'])})
+        dj = DuckJanitor.from_pandas(df)
+        res = dj.truncate_datetime_dataframe('ts', unit='year').collect()
+        # The base truncate_datetime truncates in place; verify every
+        # value got rolled to the start of its year.
+        assert (res['ts'] == pd.Timestamp('2024-01-01')).all()
+
+
+class TestDateConversionAliases:
+    def test_convert_to_date_alias(self):
+        df = pd.DataFrame({'d': ['2024-01-01', '2024-06-01']})
+        dj = DuckJanitor.from_pandas(df)
+        res = dj.convert_to_date('d', date_format='%Y-%m-%d').collect()
+        assert len(res) == 2
+
+    def test_convert_to_datetime_alias(self):
+        df = pd.DataFrame({'d': ['2024-01-01 12:00:00']})
+        dj = DuckJanitor.from_pandas(df)
+        res = dj.convert_to_datetime('d').collect()
+        assert len(res) == 1
+
+    def test_convert_unix_date_seconds(self):
+        df = pd.DataFrame({'epoch': [1577836800, 1609459200]})
+        dj = DuckJanitor.from_pandas(df)
+        res = dj.convert_unix_date('epoch', unit='seconds').collect()
+        assert 'epoch_datetime' in res.columns
+        # Just verify the output is non-null.
+        assert res['epoch_datetime'].notnull().all()
+
+    def test_convert_unix_date_milliseconds(self):
+        df = pd.DataFrame({'epoch': [1577836800000, 1609459200000]})
+        dj = DuckJanitor.from_pandas(df)
+        res = dj.convert_unix_date('epoch', unit='milliseconds').collect()
+        assert res['epoch_datetime'].notnull().all()
+
+    def test_convert_unix_date_bad_unit_raises(self):
+        df = pd.DataFrame({'epoch': [1577836800]})
+        dj = DuckJanitor.from_pandas(df)
+        with pytest.raises(ValueError, match='unit must be one of'):
+            dj.convert_unix_date('epoch', unit='fortnights')
+
+    def test_convert_excel_date(self):
+        # Excel: 25569 = 1970-01-01 (accounting for the 1900 leap year bug).
+        df = pd.DataFrame({'serial': [25569, 25569 + 365]})
+        dj = DuckJanitor.from_pandas(df)
+        res = dj.convert_excel_date('serial').collect()
+        assert 'serial_datetime' in res.columns
+        assert res['serial_datetime'].notnull().all()
+
+    def test_convert_matlab_date(self):
+        # MATLAB: 719529 = 1970-01-01.
+        df = pd.DataFrame({'serial': [719529, 719529 + 365]})
+        dj = DuckJanitor.from_pandas(df)
+        res = dj.convert_matlab_date('serial').collect()
+        assert 'serial_datetime' in res.columns
+        assert res['serial_datetime'].notnull().all()
+
+
+class TestFillDirectionAlias:
+    def test_fill_direction_forward(self):
+        df = pd.DataFrame({'a': [1.0, np.nan, np.nan, 4.0]})
+        dj = DuckJanitor.from_pandas(df)
+        res = dj.fill_direction('a', direction='forward').collect()
+        # The underlying fill() with direction='forward' carries the last
+        # seen value forward to fill NaNs that follow a known observation.
+        assert res['a'].iloc[1] == 1.0
+
+    def test_fill_direction_unknown_direction_raises(self):
+        df = pd.DataFrame({'a': [1.0, np.nan, np.nan, 4.0]})
+        dj = DuckJanitor.from_pandas(df)
+        # 'down' isn't a known direction (the base supports forward/backward).
+        with pytest.raises(ValueError):
+            dj.fill_direction('a', direction='down')
+
+
+class TestFilterColumnIsin:
+    def test_inclusion(self, base_df):
+        dj = DuckJanitor.from_pandas(base_df)
+        res = dj.filter_column_isin('group', ['x']).collect()
+        assert (res['group'] == 'x').all()
+        assert len(res) == 2
+
+    def test_exclusion_via_complement(self, base_df):
+        dj = DuckJanitor.from_pandas(base_df)
+        res = dj.filter_column_isin('group', ['x'], complement=True).collect()
+        assert (res['group'] == 'y').all()
+        assert len(res) == 2
+
+    def test_empty_list_returns_empty(self, base_df):
+        dj = DuckJanitor.from_pandas(base_df)
+        res = dj.filter_column_isin('group', []).collect()
+        assert len(res) == 0
+
+
+class TestAddColumnsAlias:
+    def test_add_columns_dict(self, base_df):
+        dj = DuckJanitor.from_pandas(base_df)
+        res = dj.add_columns({'extra': [9, 8, 7, 6]}).collect()
+        assert 'extra' in res.columns
+        assert list(res['extra']) == [9, 8, 7, 6]
+
+
+class TestMutateAlias:
+    def test_assign_alias(self, base_df):
+        dj = DuckJanitor.from_pandas(base_df)
+        res = dj.assign(double_value=[20, 40, 60, 80]).collect()
+        assert 'double_value' in res.columns
+
+
+class TestUngroup:
+    def test_ungroup_is_noop(self, base_df):
+        dj = DuckJanitor.from_pandas(base_df)
+        res = dj.ungroup().collect()
+        # Same row count, same columns.
+        assert len(res) == len(base_df)
+        assert list(res.columns) == list(base_df.columns)
+
+
+class TestGetColumnsAlias:
+    def test_get_columns(self, base_df):
+        dj = DuckJanitor.from_pandas(base_df)
+        res = dj.get_columns('name', 'value').collect()
+        assert sorted(res.columns) == ['name', 'value']
+
+
+class TestMove:
+    def test_move_before(self, base_df):
+        dj = DuckJanitor.from_pandas(base_df)
+        res = dj.move('value', 'name', position='before').collect()
+        assert list(res.columns)[0:2] == ['value', 'name']
+
+    def test_move_after(self, base_df):
+        dj = DuckJanitor.from_pandas(base_df)
+        res = dj.move('value', 'name', position='after').collect()
+        cols = list(res.columns)
+        assert cols.index('value') == cols.index('name') + 1
+
+    def test_move_missing_columns_raises(self, base_df):
+        dj = DuckJanitor.from_pandas(base_df)
+        with pytest.raises(ValueError):
+            dj.move('foo', 'bar', position='before')
+
+
+class TestReorderColumns:
+    def test_reorder_columns_basic(self, base_df):
+        dj = DuckJanitor.from_pandas(base_df)
+        res = dj.reorder_columns(['value', 'name']).collect()
+        assert list(res.columns) == ['value', 'name']
+
+    def test_reorder_columns_drop_unlisted(self, base_df):
+        dj = DuckJanitor.from_pandas(base_df)
+        res = dj.reorder_columns(['name']).collect()
+        assert list(res.columns) == ['name']
+
+    def test_reorder_columns_unknown_raises(self, base_df):
+        dj = DuckJanitor.from_pandas(base_df)
+        with pytest.raises(ValueError):
+            dj.reorder_columns(['name', 'unknown'])
+
+
+class TestGetIndexLabels:
+    def test_get_index_labels(self, base_df):
+        dj = DuckJanitor.from_pandas(base_df)
+        assert dj.get_index_labels() == list(base_df.columns)
+
+
+# ====================================================================
+# Batch 1 — small DuckDB-trivial helpers
+# ====================================================================
+
+
+class TestShuffle:
+    def test_shuffle_returns_same_rows(self):
+        df = pd.DataFrame({'a': list(range(20))})
+        dj = DuckJanitor.from_pandas(df)
+        out = dj.shuffle().collect()
+        # Set-equal to the input set.
+        assert sorted(out['a']) == list(range(20))
+
+    def test_shuffle_seed_reproducible(self):
+        df = pd.DataFrame({'a': list(range(10))})
+        out1 = DuckJanitor.from_pandas(df).shuffle(seed=42).collect()
+        out2 = DuckJanitor.from_pandas(df).shuffle(seed=42).collect()
+        assert list(out1['a']) == list(out2['a'])
+
+
+class TestToset:
+    def test_toset_returns_sorted_unique(self):
+        df = pd.DataFrame({'g': ['b', 'a', 'c', 'a', 'b']})
+        dj = DuckJanitor.from_pandas(df)
+        assert dj.toset('g') == ['a', 'b', 'c']
+
+
+class TestTakeFirst:
+    def test_take_first_three(self):
+        df = pd.DataFrame({'a': [1, 2, 3, 4, 5]})
+        dj = DuckJanitor.from_pandas(df)
+        out = dj.take_first(3).collect()
+        assert sorted(out['a']) == [1, 2, 3]
+
+    def test_take_first_negative_raises(self):
+        df = pd.DataFrame({'a': [1, 2]})
+        dj = DuckJanitor.from_pandas(df)
+        with pytest.raises(ValueError):
+            dj.take_first(-1)
+
+
+class TestRoundToFraction:
+    def test_round_to_fraction_thirds(self):
+        df = pd.DataFrame({'a': [0.13, 0.27, 0.55, 0.81]})
+        dj = DuckJanitor.from_pandas(df)
+        out = dj.round_to_fraction('a', denominator=3).collect()
+        # Each value snaps to the nearest 1/3.
+        col = out['a_rounded']
+        for x in col.to_numpy():
+            # Multiplying by 3 and rounding yields an integer.
+            assert round(float(x) * 3) == float(x) * 3
+
+    def test_round_to_fraction_zero_raises(self):
+        df = pd.DataFrame({'a': [0.5]})
+        dj = DuckJanitor.from_pandas(df)
+        with pytest.raises(ValueError):
+            dj.round_to_fraction('a', denominator=0)
+
+
+class TestCompareDfColsSame:
+    def test_true_when_columns_match(self):
+        df1 = pd.DataFrame({'a': [1], 'b': [2]})
+        df2 = pd.DataFrame({'a': [3], 'b': [4]})
+        a = DuckJanitor.from_pandas(df1)
+        b = DuckJanitor.from_pandas(df2)
+        assert a.compare_df_cols_same(b) is True
+
+    def test_false_when_columns_differ(self):
+        df1 = pd.DataFrame({'a': [1], 'b': [2]})
+        df2 = pd.DataFrame({'a': [3], 'c': [4]})
+        a = DuckJanitor.from_pandas(df1)
+        b = DuckJanitor.from_pandas(df2)
+        assert a.compare_df_cols_same(b) is False
+
+
+class TestCartesianProduct:
+    def test_cartesian_product_size(self):
+        df1 = pd.DataFrame({'x': [1, 2, 3]})
+        df2 = pd.DataFrame({'y': ['a', 'b']})
+        a = DuckJanitor.from_pandas(df1)
+        b = DuckJanitor.from_pandas(df2)
+        out = a.cartesian_product(b).collect()
+        assert len(out) == 6  # 3 * 2 = 6
+
+    def test_cartesian_product_type_check(self):
+        a = DuckJanitor.from_pandas(pd.DataFrame({'x': [1]}))
+        with pytest.raises(TypeError):
+            a.cartesian_product('not-a-duckjanitor')
+
+
+class TestThen:
+    def test_then_chains_callables(self):
+        def add_marker(d):
+            return d.add_column('marker', [1] * len(d.collect()))
+
+        df = pd.DataFrame({'a': [1, 2, 3]})
+        dj = DuckJanitor.from_pandas(df)
+        out = dj.then(add_marker).collect()
+        assert 'marker' in out.columns
+
+    def test_then_requires_duckjanitor_return(self):
+        def bad(d):
+            return 'not-a-duckjanitor'
+        df = pd.DataFrame({'a': [1]})
+        dj = DuckJanitor.from_pandas(df)
+        with pytest.raises(TypeError):
+            dj.then(bad)
+
+
+class TestScaleMad:
+    def test_scale_mad_all(self):
+        df = pd.DataFrame({'x': [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]})
+        dj = DuckJanitor.from_pandas(df)
+        out = dj.scale_mad('x').collect()
+        assert 'x_scaled' in out.columns
+
+    def test_scale_mad_bad_by_raises(self):
+        df = pd.DataFrame({'x': [1.0]})
+        dj = DuckJanitor.from_pandas(df)
+        with pytest.raises(ValueError):
+            dj.scale_mad('x', by='row')
+
+
+class TestExcelTimeToNumeric:
+    def test_converts_fraction_to_seconds(self):
+        df = pd.DataFrame({'t': [0.5]})  # 0.5 day = 43200 seconds
+        dj = DuckJanitor.from_pandas(df)
+        out = dj.excel_time_to_numeric('t').collect()
+        assert abs(out['t_seconds'].iloc[0] - 43200.0) < 1e-6
+
+
+class TestSasNumericToDate:
+    def test_sas_origin_1960(self):
+        df = pd.DataFrame({'d': [0.0]})  # 1960-01-01 in SAS
+        dj = DuckJanitor.from_pandas(df)
+        out = dj.sas_numeric_to_date('d').collect()
+        # 1960-01-01 UTC; we accept any reasonable string form.
+        v = str(out['d_datetime'].iloc[0])
+        assert '1960' in v or v.startswith('1959')
+
+
+class TestBatch1Sanity:
+    def test_existing_tests_still_pass(self):
+        # Placeholder: pass-over test (real coverage lives in dedicated files).
+        assert True

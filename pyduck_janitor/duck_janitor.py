@@ -879,6 +879,385 @@ class DuckJanitor:
         self._connection.register(temp_name, self._relation)
         query = f"EXPLAIN SELECT * FROM {temp_name}"
         return str(self._connection.execute(query).fetchall())
-    
+
+    # ---------------------------------------------------------------
+    # pyjanitor parity aliases (R/pyjanitor function name alignment).
+    # These thin wrappers align the function name with pyjanitor so
+    # users migrating from pyjanitor do not have to learn new names.
+    # ---------------------------------------------------------------
+
+    def rename_columns(self, old_name: str, new_name: str) -> 'DuckJanitor':
+        """Alias of :meth:`rename_column` for the pyjanitor plural name."""
+        return self.rename_column(old_name, new_name)
+
+    def truncate_datetime_dataframe(
+        self,
+        column: str,
+        unit: str = 'day',
+        target_column: Optional[str] = None,
+    ) -> 'DuckJanitor':
+        """Alias of :meth:`truncate_datetime` matching pyjanitor's name."""
+        return self.truncate_datetime(column=column, unit=unit,
+                                          target_column=target_column)
+
+    def convert_to_date(self, column: str, date_format: Optional[str] = None,
+                         target_column: Optional[str] = None,
+                         **kwargs) -> 'DuckJanitor':
+        """Alias of :meth:`convert_date` matching pyjanitor's name."""
+        return self.convert_date(column=column, target_column=target_column,
+                                    date_format=date_format)
+
+    def convert_to_datetime(self, column: str, date_format: Optional[str] = None,
+                              target_column: Optional[str] = None,
+                              **kwargs) -> 'DuckJanitor':
+        """Alias of :meth:`convert_date` matching pyjanitor's name."""
+        return self.convert_date(column=column, target_column=target_column,
+                                    date_format=date_format)
+
+    def convert_unix_date(self, column: str,
+                            unit: str = 'seconds',
+                            target_column: Optional[str] = None) -> 'DuckJanitor':
+        """Coerce a UNIX/epoch numeric column into a DuckDB TIMESTAMP.
+
+        Parameters
+        ----------
+        column : str
+            Name of the column holding the Unix epoch value.
+        unit : str, default 'seconds'
+            One of {'seconds', 'milliseconds', 'microseconds'}.
+        target_column : str, optional
+            Name of the output column. Defaults to ``column + '_datetime'``.
+        """
+        out = target_column or f'{column}_datetime'
+        multipliers = {'seconds': 1, 'milliseconds': 1000, 'microseconds': 1000000}
+        if unit not in multipliers:
+            raise ValueError(
+                f'convert_unix_date(): unit must be one of '
+                f'{sorted(multipliers)}; got {unit!r}.'
+            )
+        multiplier = multipliers[unit]
+        temp_name = f'_unix_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        # Use TO_TIMESTAMP which accepts DOUBLE seconds directly.
+        query = (
+            f"SELECT *, TO_TIMESTAMP(CAST({column} AS DOUBLE) / {multiplier}) AS {out} "
+            f"FROM {temp_name}"
+        )
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def convert_excel_date(self, column: str,
+                              target_column: Optional[str] = None) -> 'DuckJanitor':
+        """Coerce an Excel serial date number into a DuckDB TIMESTAMP.
+
+        Excel's serial date origin is 1899-12-30 (with the 1900 leap-year
+        bug adjustment). 1 = 1900-01-01.
+        """
+        out = target_column or f'{column}_datetime'
+        temp_name = f'_excel_date_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        # Use TO_TIMESTAMP which accepts seconds-from-epoch DOUBLE.
+        query = (
+            f"SELECT *, TO_TIMESTAMP(CAST({column} AS DOUBLE) * 86400.0 - 25569 * 86400.0) AS "
+            f"{out} FROM {temp_name}"
+        )
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def convert_matlab_date(self, column: str,
+                              target_column: Optional[str] = None) -> 'DuckJanitor':
+        """Coerce a MATLAB serial date number into a DuckDB TIMESTAMP.
+
+        MATLAB datenum origin is 0000-01-01; 1 = 0000-01-01. The offset to
+        the DuckDB TIMESTAMP epoch (1970-01-01) is 719529 days.
+        """
+        out = target_column or f'{column}_datetime'
+        temp_name = f'_matlab_date_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        query = (
+            f"SELECT *, TO_TIMESTAMP(CAST({column} AS DOUBLE) * 86400.0 - 719529 * 86400.0) AS "
+            f"{out} FROM {temp_name}"
+        )
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def fill_direction(self, column: str, direction: str = 'forward',
+                        value=None, **kwargs) -> 'DuckJanitor':
+        """Alias of :meth:`fill` matching pyjanitor's name."""
+        return self.fill(column=column, value=value, direction=direction,
+                          **kwargs)
+
+    def filter_column_isin(self, column: str, values,
+                            complement: bool = False) -> 'DuckJanitor':
+        """Filter rows where ``column`` IS IN ``values``.
+
+        ``values`` may be any iterable of scalars. Implemented as a
+        direct DuckDB SQL filter because :meth:`filter_column` requires
+        a callable/SQL-fragment criteria.
+        """
+        if column not in self._relation.columns:
+            raise ValueError(
+                f'filter_column_isin(): column {column!r} not in '
+                f'{list(self._relation.columns)}'
+            )
+        try:
+            values = list(values)
+        except TypeError:
+            raise TypeError(
+                'filter_column_isin(): values must be an iterable of scalars.'
+            )
+        if not values:
+            # Empty list returns empty relation.
+            return self.filter_on('1 = 0', complement=False)
+
+        def _format(v):
+            if v is None:
+                return 'NULL'
+            if isinstance(v, bool):
+                return 'TRUE' if v else 'FALSE'
+            if isinstance(v, (int, float)):
+                return repr(v)
+            escaped = str(v).replace("'", "''")
+            return f"'{escaped}'"
+
+        in_list = ', '.join(_format(v) for v in values)
+        op = 'NOT IN' if complement else 'IN'
+        where_clause = f'"{column}" {op} ({in_list})'
+        return self.filter_on(where_clause, complement=False)
+
+    def add_columns(self, column_values: dict) -> 'DuckJanitor':
+        """Alias of :meth:`add_column` accepting a dict of column→values
+        so multiple columns can be added in a single chained call.
+        """
+        out = self
+        for col, vals in column_values.items():
+            out = out.add_column(col, vals)
+        return out
+
+    def assign(self, **kwargs) -> 'DuckJanitor':
+        """Alias of :meth:`mutate` matching pyjanitor's name.
+
+        ``assign`` accepts keyword arguments of ``column=value`` or
+        ``column=callable``, exactly like :meth:`mutate`.
+        """
+        return self.mutate(**kwargs)
+
+    def ungroup(self, *groups, **kwargs) -> 'DuckJanitor':
+        """Identity helper that matches pyjanitor's ``ungroup`` verb.
+
+        DuckDB relations are inherently ungrouped; this is a no-op that
+        simply returns the current DuckJanitor, kept as a chainable verb.
+        """
+        return self
+
+    def get_columns(self, *names) -> 'DuckJanitor':
+        """Select columns by name (alias of :meth:`select_columns`)."""
+        return self.select_columns(list(names))
+
+    def move(self, source: str, target: str, position: str = 'before',
+              **kwargs) -> 'DuckJanitor':
+        """Move ``source`` column relative to ``target`` column.
+
+        position: ``'before'`` (default) or ``'after'``.
+        """
+        cur_cols = list(self._relation.columns)
+        if source not in cur_cols or target not in cur_cols:
+            raise ValueError(
+                f'move(): source={source!r} and target={target!r} must both '
+                f'exist in the current columns: {cur_cols}'
+            )
+        new_order = [c for c in cur_cols if c != source]
+        insert_at = new_order.index(target)
+        if position == 'after':
+            insert_at += 1
+        new_order.insert(insert_at, source)
+        cols = ', '.join(self._quote(c) for c in new_order)
+        temp_name = f'_move_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        query = f'SELECT {cols} FROM {temp_name}'
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def reorder_columns(self, new_order) -> 'DuckJanitor':
+        """Reorder the relation's columns to match ``new_order``.
+
+        Columns not listed are dropped (matching pyjanitor's behaviour,
+        where columns must be enumerated fully).
+        """
+        cur = list(self._relation.columns)
+        missing = [c for c in new_order if c not in cur]
+        if missing:
+            raise ValueError(f'reorder_columns(): unknown columns {missing}')
+        cols = ', '.join(self._quote(c) for c in new_order)
+        temp_name = f'_reorder_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        query = f'SELECT {cols} FROM {temp_name}'
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def get_index_labels(self) -> List[str]:
+        """Return the current column names as a list (label-only)."""
+        return list(self._relation.columns)
+
+    @staticmethod
+    def _quote(col: str) -> str:
+        return f'"{col.replace(chr(34), chr(34) * 2)}"'
+
+    @staticmethod
+    def _sql_value(v) -> str:
+        if v is None:
+            return 'NULL'
+        if isinstance(v, bool):
+            return 'TRUE' if v else 'FALSE'
+        if isinstance(v, (int, float)):
+            return repr(v)
+        escaped = str(v).replace("'", "''")
+        return f"'{escaped}'"
+
+    # =============================================================
+    # pyjanitor parity batch: small DuckDB-trivial helpers
+    # =============================================================
+
+    def shuffle(self, seed: Optional[int] = None) -> 'DuckJanitor':
+        """Return a relation with all rows in random order (R: ``shuffle``).
+
+        Parameters
+        ----------
+        seed : int, optional
+            If provided, drives DuckDB's ``random()`` PRNG for reproducibility.
+            The seed is normalized into ``[-1.0, 1.0]`` because DuckDB's
+            ``setseed`` only accepts that range.
+        """
+        if seed is not None:
+            normalized = (abs(int(seed)) % (2 ** 31)) / (2 ** 31)
+            seed_clause = f'setseed({normalized})'
+        else:
+            seed_clause = None
+        temp_name = f'_shuffle_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        if seed_clause is not None:
+            self._connection.execute(f'SELECT {seed_clause}')
+        query = f'SELECT * FROM {temp_name} ORDER BY random()'
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def toset(self, column: str) -> list:
+        """Return the unique sorted values of ``column`` as a Python list (R: ``toset``)."""
+        temp_name = f'_toset_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        rows = self._connection.execute(
+            f'SELECT DISTINCT "{column}" FROM {temp_name} ORDER BY "{column}"'
+        ).fetchall()
+        self._connection.unregister(temp_name)
+        return [r[0] for r in rows]
+
+    def take_first(self, n: int = 1) -> 'DuckJanitor':
+        """Return a relation containing only the first ``n`` rows (R: ``take_first``)."""
+        if n < 0:
+            raise ValueError(f'take_first(): n must be >= 0; got {n}')
+        temp_name = f'_take_first_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        # LIMIT on an inner subquery to avoid WHERE-on-window-function binder error.
+        query = f'SELECT * FROM (SELECT * FROM {temp_name}) LIMIT {n}'
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def excel_time_to_numeric(self, column: str,
+                                target_column: Optional[str] = None) -> 'DuckJanitor':
+        """Convert an Excel time-fraction column (``0.0``–``1.0``) to seconds.
+
+        Excel stores time-of-day as the fractional part of a day; multiplying
+        by ``86400`` yields seconds.
+        """
+        out = target_column or f'{column}_seconds'
+        temp_name = f'_excel_time_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        query = (
+            f'SELECT *, CAST({column} * 86400.0 AS DOUBLE) AS {out} '
+            f'FROM {temp_name}'
+        )
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def sas_numeric_to_date(self, column: str,
+                              target_column: Optional[str] = None) -> 'DuckJanitor':
+        """Convert a SAS numeric date column (days since 1960-01-01) to TIMESTAMP."""
+        out = target_column or f'{column}_datetime'
+        temp_name = f'_sasdate_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        query = (
+            f'SELECT *, TO_TIMESTAMP(CAST({column} AS DOUBLE) * 86400.0 - 315619200.0) AS {out} '
+            f'FROM {temp_name}'
+        )
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def round_to_fraction(self, column: str, denominator: Union[int, float]) -> 'DuckJanitor':
+        """Round ``column`` to the nearest fraction ``1/denominator`` (R: ``round_to_fraction``)."""
+        if denominator == 0:
+            raise ValueError('round_to_fraction(): denominator must be non-zero')
+        temp_name = f'_rfrac_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        query = (
+            f'SELECT *, ROUND(CAST({column} AS DOUBLE) * {denominator}) / '
+            f'{denominator} AS "{column}_rounded" FROM {temp_name}'
+        )
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def scale_mad(self, column: str, by: str = 'all') -> 'DuckJanitor':
+        """Median-abs-deviation standardisation (R: ``scale_mad``).
+
+        ``by`` is one of ``'all'`` (default) or ``'column'``.
+        """
+        if by not in {'all', 'column'}:
+            raise ValueError(f"scale_mad(): 'by' must be 'all' or 'column'; got {by!r}")
+        temp_name = f'_mad_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        query = (
+            f'SELECT *, ({column} - (SELECT MEDIAN({column}) FROM {temp_name})) / '
+            f'(1.4826 * (SELECT MEDIAN(ABS({column} - (SELECT MEDIAN({column}) FROM {temp_name}))) '
+            f'FROM {temp_name})) AS "{column}_scaled" '
+            f'FROM {temp_name}'
+        )
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def cartesian_product(self, other: 'DuckJanitor') -> 'DuckJanitor':
+        """Return the cartesian (cross) product of ``self`` and ``other``."""
+        if not isinstance(other, DuckJanitor):
+            raise TypeError(
+                f'cartesian_product(): other must be a DuckJanitor; got {type(other).__name__}'
+            )
+        left_name = f'_cp_left_{id(self._relation)}'
+        right_name = f'_cp_right_{id(other._relation)}'
+        self._connection.register(left_name, self._relation)
+        other._connection.register(right_name, other._relation)
+        query = f'SELECT * FROM {left_name} CROSS JOIN {right_name}'
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def then(self, *funcs) -> 'DuckJanitor':
+        """Compose further verbs in sequence (R: ``then`` / ``DF_to_pandas``).
+
+        Each callable is invoked with the current DuckJanitor and must return
+        a DuckJanitor. Useful for ``pipe``-style chaining across modules.
+        """
+        out: DuckJanitor = self
+        for func in funcs:
+            res = func(out)
+            if not isinstance(res, DuckJanitor):
+                raise TypeError(
+                    f'then(): func {getattr(func, "__name__", repr(func))} '
+                    f'must return DuckJanitor; got {type(res).__name__}'
+                )
+            out = res
+        return out
+
+    def compare_df_cols_same(self, *others: 'DuckJanitor') -> bool:
+        """Compare the current relation's columns to other relations (R: ``compare_df_cols_same``)."""
+        cur_cols = list(self._relation.columns)
+        return all(cur_cols == list(o._relation.columns) for o in others)
+
     def __repr__(self) -> str:
         return f"DuckJanitor(relation={self._relation.columns}, lazy=True)"
