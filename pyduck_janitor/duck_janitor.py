@@ -1480,5 +1480,388 @@ class DuckJanitor:
         # concat orchestration; this method only coerces the calling relation.
         return DuckJanitor(new_relation, self._connection)
 
+    # =============================================================
+    # pyjanitor parity batch 3 — heavyweight helpers
+    # =============================================================
+
+    def expand(self, columns: List[str], on=None) -> 'DuckJanitor':
+        """Cartesian-expand across the unique values of ``columns`` (R: ``expand``).
+
+        ``on`` is unused for now; in R it controls the iteration order.
+        """
+        if not columns:
+            raise ValueError('expand(): columns must be a non-empty list')
+        for c in columns:
+            if c not in self._relation.columns:
+                raise ValueError(f'expand(): column {c!r} not in {list(self._relation.columns)}')
+        temp_name = f'_expand_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        # Use DuckDB GROUP BY ALL to preserve distinct combinations.
+        query = (
+            f'SELECT DISTINCT {", ".join(self._quote(c) for c in columns)} '
+            f'FROM {temp_name}'
+        )
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def expand_grid(self, *tables) -> 'DuckJanitor':
+        """Cross-join an arbitrary number of relations or value lists (R: ``expand_grid``).
+
+        Each argument may be either a DuckJanitor or an iterable of value
+        combinations to be materialised.
+        """
+        if not tables:
+            raise ValueError('expand_grid(): need at least one input')
+        # Materialise each input into a relation, then cross-join them all.
+        temp_self = f'_expand_grid_self_{id(self._relation)}'
+        self._connection.register(temp_self, self._relation)
+        result_name = temp_self
+        result_cols = [f'{result_name}."{c}"' for c in self._relation.columns]
+        for i, t in enumerate(tables):
+            try:
+                # Validate DuckJanitor.
+                rel = t._relation
+                tname = f'_expand_grid_x_{i}_{id(rel)}'
+                self._connection.register(tname, t._relation)
+                result_name = f'_expand_grid_res_{i}_{id(rel)}'
+                self._connection.execute(
+                    f'CREATE OR REPLACE TEMPORARY TABLE {result_name} AS '
+                    f'SELECT {", ".join(result_cols + [f"{tname}.*"])} '
+                    f'FROM (SELECT * FROM {tname}) CROSS JOIN (SELECT * FROM {temp_self})'
+                )
+                # After the CREATE, the result_name relation is the table itself.
+                # Re-point for the next iteration.
+                new_relation = self._connection.table(result_name)
+                # Update temp_self to result_name for next round.
+                temp_self = result_name
+                result_cols = [f'{result_name}."{c}"' for c in new_relation.columns]
+            except AttributeError:
+                # Otherwise treat as an iterable of single-column rows.
+                rows = list(t)
+                if not rows:
+                    raise ValueError(f'expand_grid(): arg {i} is empty')
+                # Build a single-column relation.
+                col_name = f'value_{i}'
+                aux_name = f'_expand_grid_aux_{i}_{id(self._relation)}'
+                self._connection.execute(
+                    f"CREATE OR REPLACE TEMPORARY TABLE {aux_name}({col_name}) AS "
+                    f"SELECT * FROM (VALUES " +
+                    ', '.join(['(\'' + str(v).replace("'", "''") + '\')' for v in rows]) +
+                    f")"
+                )
+                result_name = f'_expand_grid_res_{i}_{id(self._relation)}'
+                self._connection.execute(
+                    f'CREATE OR REPLACE TEMPORARY TABLE {result_name} AS '
+                    f'SELECT {", ".join(result_cols + [f"{aux_name}.*"])} '
+                    f'CROSS JOIN (SELECT * FROM {aux_name})'
+                )
+                new_relation = self._connection.table(result_name)
+                temp_self = result_name
+                result_cols = [f'{result_name}."{c}"' for c in new_relation.columns]
+        final_name = f'_expand_grid_final_{id(self._relation)}'
+        self._connection.execute(f'CREATE OR REPLACE TEMPORARY VIEW {final_name} AS SELECT * FROM {result_name}')
+        new_relation = self._connection.view(final_name)
+        # Best-effort cleanup of aux temp tables.
+        for i in range(len(tables)):
+            try:
+                self._connection.execute(f'DROP TABLE IF EXISTS _expand_grid_aux_{i}_{id(self._relation)}')
+            except Exception:
+                pass
+        return DuckJanitor(new_relation, self._connection)
+
+    def change_index_dtype(self, dtype: str,
+                             target_name: Optional[str] = None) -> 'DuckJanitor':
+        """Create a cast version of the FIRST column with the desired ``dtype`` (R: ``change_index_dtype``).
+
+        DuckDB relations have no intrinsic integer index; we mimic by
+        projecting a typed copy of the first column.
+        """
+        cur_cols = list(self._relation.columns)
+        if not cur_cols:
+            raise ValueError('change_index_dtype(): relation has no columns')
+        src = cur_cols[0]
+        out = target_name or f'{src}_idx_typed'
+        temp_name = f'_idx_dtype_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        query = (
+            f'SELECT *, CAST("{src}" AS {dtype}) AS "{out}" '
+            f'FROM {temp_name}'
+        )
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def collapse_levels(self, sep: str = '_',
+                           column: Optional[str] = None) -> 'DuckJanitor':
+        """Collapse a tuple-named index column by joining on ``sep`` (R: ``collapse_levels``).
+
+        For simplicity, when ``column`` is None this concatenates all
+        columns together. When ``column`` is given, only that column is
+        collapsed (no-op since DuckDB columns are flat).
+        """
+        cur_cols = list(self._relation.columns)
+        if column and column not in cur_cols:
+            raise ValueError(f'collapse_levels(): unknown column {column!r}')
+        temp_name = f'_collapse_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        if column:
+            # No-op: a single column is already flat; return as-is.
+            new_relation = self._connection.query(f'SELECT * FROM {temp_name}')
+        else:
+            select_parts = [
+                f'CAST("{c}" AS VARCHAR) AS "{c}"' for c in cur_cols
+            ]
+            query = (
+                f'SELECT *, '
+                f'CONCAT(' +
+                ', '.join(f'CAST("{c}" AS VARCHAR)' for c in cur_cols) +
+                f') AS "{sep.join(cur_cols)}" '
+                f'FROM {temp_name}'
+            )
+            new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def explode_index(self, column: str,
+                        names: Optional[List[str]] = None,
+                        separator: str = '_') -> 'DuckJanitor':
+        """Split ``column`` into multiple sub-fields (R: ``explode_index``).
+
+        ``names`` lists the new column names. By default a single new
+        column called ``<column>_parsed`` is created.
+        """
+        if column not in self._relation.columns:
+            raise ValueError(f'explode_index(): unknown column {column!r}')
+        temp_name = f'_explode_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        cur_cols = list(self._relation.columns)
+        out_cols = names or [f'{column}_parsed']
+        selects = [self._quote(c) for c in cur_cols]
+        # Toy implementation: extract numeric sequences as a single column.
+        # DuckDB's regex support allows richer extraction; this is a stub.
+        query = (
+            f'SELECT {", ".join(selects)}, '
+            f'regexp_extract(CAST("{column}" AS VARCHAR), \'(\\d+)\', 1) AS "{out_cols[0]}" '
+            f'FROM {temp_name}'
+        )
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def summarise(self, group_by: Optional[List[str]] = None,
+                    agg_spec: Optional[dict] = None) -> 'DuckJanitor':
+        """Group-by summarisation helper (R: ``summarise`` / ``summarize``).
+
+        Parameters
+        ----------
+        group_by : list of str
+            Columns to group by; ``None`` means no grouping.
+        agg_spec : dict
+            Mapping of ``new_column_name -> (source_column, agg_function_string)``.
+            Examples::
+
+                {'avg_age': ('age', 'AVG'), 'n': ('*', 'COUNT')}
+        """
+        agg_spec = agg_spec or {}
+        cur_cols = list(self._relation.columns)
+        if group_by:
+            missing = [c for c in group_by if c not in cur_cols]
+            if missing:
+                raise ValueError(f'summarise(): unknown group_by columns {missing}')
+        temp_name = f'_summarise_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        select_parts = []
+        if group_by:
+            select_parts.extend(self._quote(c) for c in group_by)
+        for new_col, (src, agg) in agg_spec.items():
+            agg = agg.upper()
+            if src == '*':
+                expr = f'COUNT(*) AS {new_col}'
+            else:
+                if src not in cur_cols:
+                    raise ValueError(f'summarise(): unknown source {src!r}')
+                expr = f'{agg}("{src}") AS {new_col}'
+            select_parts.append(expr)
+        if not select_parts:
+            raise ValueError('summarise(): no group_by or aggregation specified')
+        group_by_clause = (
+            f'GROUP BY {", ".join(self._quote(c) for c in group_by)}'
+            if group_by else ''
+        )
+        query = f'SELECT {", ".join(select_parts)} FROM {temp_name} {group_by_clause}'
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def pivot_longer_spec(self, id_cols: List[str],
+                            value_cols: List[str],
+                            names_to: str = 'name',
+                            values_to: str = 'value',
+                            names_sep: Optional[str] = None) -> 'DuckJanitor':
+        """Long-form pivot driven by a column-name spec (R: ``pivot_longer_spec``)."""
+        if not value_cols:
+            raise ValueError('pivot_longer_spec(): value_cols must be non-empty')
+        missing_vals = [c for c in value_cols if c not in self._relation.columns]
+        if missing_vals:
+            raise ValueError(f'pivot_longer_spec(): unknown value_cols {missing_vals}')
+        cur_cols = list(self._relation.columns)
+        select_parts = [self._quote(c) for c in cur_cols if c not in value_cols]
+        if names_sep:
+            # Apply split on each value column name via DuckDB transform.
+            for vc in value_cols:
+                split_parts = vc.split(names_sep)
+                for k, part in enumerate(split_parts):
+                    alias = f'{names_to}_{k}' if k < len(split_parts) - 1 else values_to
+                    if k < len(split_parts) - 1:
+                        select_parts.append(f"'{part}' AS {alias}")
+                # Last part becomes the values column.
+                select_parts.append(f'CAST("{vc}" AS DOUBLE) AS "{values_to}_{vc}"')
+        else:
+            select_parts.append(f'UNNEST({", ".join(self._quote(v) for v in value_cols)}) AS "{values_to}"')
+        temp_name = f'_plspec_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        # Without UNNEST it's awkward to pivot properly here; emulate with cross-join.
+        # Practical implementation: emit one row per (id × values) using unnest of an array.
+        value_arr = '[' + ', '.join(self._quote(v) for v in value_cols) + ']'
+        final_parts = []
+        for c in cur_cols:
+            if c in value_cols:
+                continue
+            final_parts.append(self._quote(c))
+        # Build a structured unpivot using DuckDB's UNPIVOT extension.
+        unpivot_query = f"SELECT * FROM {temp_name} UNPIVOT ({values_to} FOR {names_to} IN ({', '.join(self._quote(v) for v in value_cols)}))"
+        new_relation = self._connection.query(unpivot_query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def pivot_wider_spec(self, id_cols: List[str],
+                            names_from: str,
+                            values_from: str,
+                            names_glue: str = '_') -> 'DuckJanitor':
+        """Wide pivot driven by a column-name spec (R: ``pivot_wider_spec``)."""
+        if names_from not in self._relation.columns:
+            raise ValueError(f'pivot_wider_spec(): unknown names_from {names_from!r}')
+        if values_from not in self._relation.columns:
+            raise ValueError(f'pivot_wider_spec(): unknown values_from {values_from!r}')
+        temp_name = f'_pwspec_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        # DuckDB's PIVOT requires a literal list of values. Collect them first.
+        distinct_values = [
+            r[0] for r in self._connection.execute(
+                f'SELECT DISTINCT "{names_from}" FROM {temp_name} ORDER BY "{names_from}"'
+            ).fetchall()
+        ]
+        if not distinct_values:
+            raise ValueError('pivot_wider_spec(): no values in names_from')
+        values_csv = ', '.join(self._sql_value(v) for v in distinct_values)
+        id_csv = ', '.join(self._quote(c) for c in id_cols)
+        query = (
+            f'SELECT {id_csv} FROM {temp_name} '
+            f'PIVOT (FIRST({values_from}) FOR {names_from} IN ({values_csv}))'
+        )
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def join_agg(self, other: 'DuckJanitor', on: tuple,
+                  aggs: dict) -> 'DuckJanitor':
+        """Aggregate join (R: ``join_agg``) — left-join with arbitrary aggregations.
+
+        ``aggs`` is a dict mapping ``new_col -> ("COL", AGG)``.
+        """
+        cur_cols = list(self._relation.columns)
+        other_cols = list(other._relation.columns)
+        if len(on) != 3:
+            raise ValueError('join_agg(): on must be (left, right, op)')
+        left_on, right_on, op = on
+        if left_on not in cur_cols:
+            raise ValueError(f'join_agg(): left_on {left_on!r} not in current columns')
+        if right_on not in other_cols:
+            raise ValueError(f'join_agg(): right_on {right_on!r} not in other columns')
+        if op == '==':
+            raise ValueError(
+                "join_agg(): equality joins are not supported; use a non-equality op "
+                "or use conditional_join() for equality."
+            )
+        left_name = f'_jagg_left_{id(self._relation)}'
+        right_name = f'_jagg_right_{id(other._relation)}'
+        self._connection.register(left_name, self._relation)
+        other._connection.register(right_name, other._relation)
+        agg_expressions = ', '.join(
+            f'{agg.upper()}("{col}") AS {new_col}'
+            for new_col, (col, agg) in aggs.items()
+        )
+        # Build a fully-qualified projection list so the join key columns
+        # can be quoted explicitly to avoid "ambiguous column" binder errors.
+        full_cur = ', '.join(f'"{left_name}"."{c}" AS "{c}"' for c in cur_cols)
+        agg_columns = ', '.join(f'g."{new_col}" AS "{new_col}"' for new_col in aggs.keys())
+        query = (
+            f'SELECT {full_cur}, {agg_columns} '
+            f'FROM {left_name} LEFT JOIN ('
+            f'SELECT "{right_on}", {agg_expressions} '
+            f'FROM {right_name} GROUP BY "{right_on}"'
+            f') g ON "{left_name}"."{left_on}" {op} g."{right_on}"'
+        )
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def get_join_indices(self, other: 'DuckJanitor', conditions) -> dict:
+        """Compute join key indices without materialising the join (R: ``get_join_indices``)."""
+        if not isinstance(other, DuckJanitor):
+            raise TypeError('get_join_indices(): other must be a DuckJanitor')
+        if isinstance(conditions, tuple) and len(conditions) == 3:
+            conditions = [conditions]
+        else:
+            try:
+                conditions = list(conditions)
+            except TypeError:
+                raise TypeError(
+                    'get_join_indices(): conditions must be a (left, right, op) tuple or list'
+                )
+        left_name = f'_gjidx_l_{id(self._relation)}'
+        right_name = f'_gjidx_r_{id(other._relation)}'
+        self._connection.register(left_name, self._relation)
+        other._connection.register(right_name, other._relation)
+        result = {}
+        for left_on, right_on, op in conditions:
+            if left_on not in self._relation.columns:
+                raise ValueError(f'get_join_indices(): left_on {left_on!r} missing')
+            if right_on not in other._relation.columns:
+                raise ValueError(f'get_join_indices(): right_on {right_on!r} missing')
+            # Pull all values to compute indices in Python.
+            left_vals = [
+                r[0] for r in self._connection.execute(
+                    f'SELECT "{left_on}" FROM {left_name}'
+                ).fetchall()
+            ]
+            right_vals = [
+                r[0] for r in other._connection.execute(
+                    f'SELECT "{right_on}" FROM {right_name}'
+                ).fetchall()
+            ]
+            # Generic dispatcher using Python operator.
+            import operator as _op
+            opmap = {'<': _op.lt, '<=': _op.le, '>': _op.gt, '>=': _op.ge,
+                       '==': _op.eq, '!=': _op.ne}
+            py_op = opmap.get(op)
+            if py_op is None:
+                raise ValueError(f'get_join_indices(): unsupported op {op!r}')
+            pairs = [(i, j) for i, l in enumerate(left_vals)
+                              for j, r in enumerate(right_vals)
+                              if py_op(l, r)]
+            result[(left_on, right_on, op)] = pairs
+        return result
+
+    def to_datetime(self, column: str, format: Optional[str] = None,
+                      target_column: Optional[str] = None) -> 'DuckJanitor':
+        """Cast ``column`` to a TIMESTAMP using DuckDB ``strptime`` (R: ``to_datetime``)."""
+        out = target_column or f'{column}_ts'
+        if column not in self._relation.columns:
+            raise ValueError(f'to_datetime(): unknown column {column!r}')
+        temp_name = f'_todt_{id(self._relation)}'
+        self._connection.register(temp_name, self._relation)
+        format_arg = f', {self._sql_value(format)}' if format is not None else ''
+        query = (
+            f'SELECT *, TRY_CAST(strptime(CAST("{column}" AS VARCHAR)'
+            f'{format_arg}) AS TIMESTAMP) AS "{out}" '
+            f'FROM {temp_name}'
+        )
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
     def __repr__(self) -> str:
         return f"DuckJanitor(relation={self._relation.columns}, lazy=True)"
