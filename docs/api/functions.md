@@ -733,6 +733,21 @@ a callable/SQL-fragment criteria.
 filter_column_isin(self, column: str, values, complement: bool = False) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column** — str
+  Name of the column to filter on.
+- **values** — iterable
+  Any iterable of scalars; quoted/escaped for DuckDB before
+  being inlined into the SQL ``IN`` clause.
+- **complement** — bool, default False
+  If True, keep rows that *aren't* in ``values``.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, restricted to matching rows.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -750,6 +765,21 @@ Filter rows based on a SQL-like criteria string.
 ```python
 filter_on(self, criteria: str, complement: bool = False) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **criteria** — str
+  A SQL WHERE-clause fragment evaluated against the current
+  relation (``age > 18``); ``self`` is replaced with the
+  registered relation name.
+- **complement** — bool, default False
+  If True, keep rows that *don't* match ``criteria``.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, restricted to rows matching the
+criteria (or non-matching if ``complement=True``).
 
 **Example** *(from verified snippet)*
 
@@ -769,6 +799,26 @@ Filter rows based on whether a string column contains a substring.
 filter_string(self, column: str, search_string: str, complement: bool = False, case: bool = True, regex: bool = True) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column** — str
+  Name of the column to search.
+- **search_string** — str
+  Substring to look for. When ``regex=True`` this is a regular
+  expression; otherwise it's a literal substring.
+- **complement** — bool, default False
+  If True, keep rows that *don't* match ``search_string``.
+- **case** — bool, default True
+  If False, perform case-insensitive matching.
+- **regex** — bool, default True
+  If False, treat ``search_string`` as a literal substring
+  rather than a regular expression.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, restricted to matching rows.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -786,6 +836,24 @@ Range-filter rows by a datetime ``column`` (R: ``filter_date``).
 ```python
 filter_date(self, column: str, start_date=None, end_date=None) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **column** — str
+  Name of the datetime column to range-filter on.
+- **start_date** — str, int, float, datetime, or None, optional
+  Lower bound (inclusive). ``None`` means no lower bound.
+  Strings, ints and floats are passed through DuckDB's
+  value-literal handling; pass ``datetime`` objects for
+  type safety.
+- **end_date** — str, int, float, datetime, or None, optional
+  Upper bound (inclusive). ``None`` means no upper bound.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, restricted to rows whose ``column``
+falls inside ``[start_date, end_date]``.
 
 **Example** *(from verified snippet)*
 
@@ -899,6 +967,19 @@ See :func:`pyduck_janitor.cleaning_ops.select_columns` for details.
 select_columns(self, columns: Union[str, List[str]]) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **columns** — str or list of str
+  Either a single column name, a comma-separated string
+  (``"a, b, c"``), a list of names/patterns, a glob
+  (``"value*"``), or a regex prefix (``"re:^v_"``).
+  :class:`DropLabel` may be mixed in to exclude a column.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, restricted to the selected columns.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -929,6 +1010,22 @@ not implemented; they will raise ``NotImplementedError``.
 select(self, *args, **kwargs) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **args**
+  Positional selector arguments. Not implemented; any
+  positional arg raises ``NotImplementedError``.
+- **kwargs**
+  Only ``columns=`` is implemented; all other kwargs
+  (``index=``, ``axis=``, ``invert=``, ``rows=``) raise
+  ``NotImplementedError``.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, restricted to the requested
+columns.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -946,6 +1043,21 @@ Select specific rows by index or condition.
 ```python
 select_rows(self, indices: Union[List[int], str, NoneType] = None, criteria: Optional[str] = None) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **indices** — list of int or str, optional
+  Either a list of 0-indexed row positions, or a SQL string
+  (``"row_number() BETWEEN 1 AND 5"`` style). Mutually exclusive
+  with ``criteria``.
+- **criteria** — str, optional
+  SQL WHERE-clause fragment (``age > 18``). Mutually exclusive
+  with ``indices``.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, restricted to the selected rows.
 
 **Example** *(from verified snippet)*
 
@@ -965,6 +1077,23 @@ Transform a column using a function or SQL expression.
 transform_column(self, column: str, func: Union[str, Callable], target_column: Optional[str] = None) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column** — str
+  Name of the column to transform.
+- **func** — str or Callable
+  Either a SQL expression referencing ``column`` (``"UPPER(column)"``)
+  or a Python callable applied row-wise (column → scalar).
+- **target_column** — str, optional
+  Name of the output column. Defaults to overwriting ``column``
+  in place.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with ``column`` replaced or
+``target_column`` added.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -982,6 +1111,24 @@ Transform multiple columns using a function or SQL expression.
 ```python
 transform_columns(self, columns: Union[str, List[str]], func: Union[str, Callable], target_columns: Union[str, List[str], NoneType] = None) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **columns** — str or list of str
+  One or more column names to transform. When a single column
+  is passed, ``func`` may be a Python callable; with multiple
+  columns ``func`` must be a SQL expression using the same
+  column names as placeholders.
+- **func** — str or Callable
+  SQL expression or Python callable.
+- **target_columns** — str or list of str, optional
+  Output column name(s). Defaults to overwriting each input
+  column in place.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the transformed columns.
 
 **Example** *(from verified snippet)*
 
