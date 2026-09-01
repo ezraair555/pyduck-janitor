@@ -5,7 +5,6 @@ from __future__ import annotations
 import duckdb
 import pandas as pd
 import pytest
-
 from pyduck_janitor import DuckJanitor
 from pyduck_janitor.cleaning_ops import filter_column, select_rows
 
@@ -39,7 +38,9 @@ def sample_df() -> pd.DataFrame:
 def test_filter_on_rejects_destructive_sql(criteria: str, sample_df: pd.DataFrame) -> None:
     """filter_on should reject multi-statement and destructive SQL fragments."""
     dj = DuckJanitor.from_pandas(sample_df)
-    with pytest.raises(ValueError, match="disallowed|cannot contain ';'|cannot contain SQL comments"):
+    with pytest.raises(
+        ValueError, match="disallowed|cannot contain ';'|cannot contain SQL comments"
+    ):
         dj.filter_on(criteria).collect()
 
 
@@ -63,7 +64,9 @@ def test_filter_column_rejects_destructive_sql(criteria: str, sample_df: pd.Data
 
 
 @pytest.mark.parametrize("indices", [[-1], [0, -2], [0, "1"], ["1"]])
-def test_select_rows_rejects_invalid_indices(indices: list[object], sample_df: pd.DataFrame) -> None:
+def test_select_rows_rejects_invalid_indices(
+    indices: list[object], sample_df: pd.DataFrame
+) -> None:
     """select_rows should reject invalid row index lists."""
     conn = duckdb.connect()
     rel = conn.from_df(sample_df)
@@ -154,7 +157,7 @@ def test_jitter_rejects_negative_scale(scale: float, sample_df: pd.DataFrame) ->
         dj.jitter("age", "age_j", scale=scale).collect()
 
 
-@pytest.mark.parametrize("value_pairs", [{}, dict()])
+@pytest.mark.parametrize("value_pairs", [{}, {}])
 def test_find_replace_rejects_empty_mapping(
     value_pairs: dict[object, object], sample_df: pd.DataFrame
 ) -> None:
@@ -211,7 +214,9 @@ def test_join_apply_cross_connection_materialization() -> None:
     conn_right = duckdb.connect()
     left = DuckJanitor(conn_left.from_df(pd.DataFrame({"id": [1, 2], "a": [10, 20]})), conn_left)
     right = DuckJanitor(conn_right.from_df(pd.DataFrame({"id": [1, 2], "b": [1, 2]})), conn_right)
-    result = left.join_apply(right, on="id", func=lambda row: row["a"] + row["b"], new_column_name="sum").collect()
+    result = left.join_apply(
+        right, on="id", func=lambda row: row["a"] + row["b"], new_column_name="sum"
+    ).collect()
     assert list(result["sum"]) == [11, 22]
 
 
@@ -244,6 +249,7 @@ def test_alias_rejects_empty_string(alias_value: str, sample_df: pd.DataFrame) -
 
 
 # ---- H1/H2: SQL fragment validator should not block legitimate values ----
+
 
 def test_filter_on_allows_string_literal_with_dashes(sample_df: pd.DataFrame) -> None:
     """filter_on should allow string literals containing -- (H1 fix)."""
@@ -294,6 +300,7 @@ def test_filter_on_still_blocks_delete_from(sample_df: pd.DataFrame) -> None:
 
 # ---- H3: filter_string regex error handling ----
 
+
 def test_filter_string_invalid_regex_raises_value_error(sample_df: pd.DataFrame) -> None:
     """filter_string should raise ValueError (not re.error) for invalid regex (H3 fix)."""
     dj = DuckJanitor.from_pandas(sample_df)
@@ -311,6 +318,7 @@ def test_filter_string_valid_regex_works(sample_df: pd.DataFrame) -> None:
 
 # ---- L8: DuckJanitor.sql() word-boundary replacement ----
 
+
 def test_sql_word_boundary_replacement() -> None:
     """sql() should only replace the standalone word 'self', not substrings."""
     df = pd.DataFrame({"selfish": [1, 2], "val": [10, 20]})
@@ -324,6 +332,7 @@ def test_sql_word_boundary_replacement() -> None:
 
 # ---- M4: add_column with literal string containing semicolon ----
 
+
 def test_add_column_literal_string_with_semicolon() -> None:
     """add_column should fall back to literal for strings that fail SQL validation (M4 fix)."""
     df = pd.DataFrame({"a": [1, 2, 3]})
@@ -333,6 +342,7 @@ def test_add_column_literal_string_with_semicolon() -> None:
 
 
 # ---- M5: validation branch coverage ----
+
 
 def test_clean_names_rejects_invalid_case_type(sample_df: pd.DataFrame) -> None:
     dj = DuckJanitor.from_pandas(sample_df)
@@ -439,6 +449,7 @@ def test_pivot_longer_rejects_empty_names_to(sample_df: pd.DataFrame) -> None:
 
 # ---- M2: find_replace with numeric keys/values ----
 
+
 def test_find_replace_numeric_keys_values() -> None:
     """find_replace should accept numeric keys and values (M2 regression test)."""
     df = pd.DataFrame({"code": [1, 2, 3]})
@@ -451,6 +462,7 @@ def test_find_replace_numeric_keys_values() -> None:
 
 # ---- M6: positive control for filter_column ----
 
+
 def test_filter_column_positive_control(sample_df: pd.DataFrame) -> None:
     """filter_column should pass through legitimate SQL predicates (M6 fix)."""
     dj = DuckJanitor.from_pandas(sample_df)
@@ -460,6 +472,7 @@ def test_filter_column_positive_control(sample_df: pd.DataFrame) -> None:
 
 
 # ---- L6: head(n=0) edge case ----
+
 
 def test_head_zero_returns_empty(sample_df: pd.DataFrame) -> None:
     """head(n=0) should return an empty DataFrame (L6)."""

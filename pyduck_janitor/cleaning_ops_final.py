@@ -10,26 +10,40 @@ This module adds the final SQL-based transformations including:
 - Hybrid layer (materialize → Python → re-wrap)
 """
 
+from typing import Any, Callable, Optional, Union
+
 import duckdb
 import pandas as pd
-from typing import Optional, Union, List, Any, Dict, Callable
 
-from .duck_janitor import DuckJanitor
 from .cleaning_ops import (
-    _quote_id,
-    _sql_literal,
-    _register_relation,
     _ensure_columns_exist,
+    _quote_id,
+    _register_relation,
+    _sql_literal,
     _validate_sql_fragment,
 )
-
+from .duck_janitor import DuckJanitor
 
 # ========== Hybrid Layer (Materialize → Python → Re-wrap) ==========
 
-def drop_duplicate_columns(relation: duckdb.DuckDBPyRelation,
-                           conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+
+def drop_duplicate_columns(
+    relation: duckdb.DuckDBPyRelation, conn: Optional[duckdb.DuckDBPyConnection] = None
+) -> duckdb.DuckDBPyRelation:
     """
     Remove columns that are exact duplicates of other columns.
+
+    Parameters
+    ----------
+    relation : duckdb.DuckDBPyRelation
+        The input relation.
+    conn : duckdb.DuckDBPyConnection, optional
+        DuckDB connection.
+
+    Returns
+    -------
+    duckdb.DuckDBPyRelation
+        Relation with duplicate columns removed (first occurrence kept).
     """
     table_name = _register_relation(conn, relation)
     cols = relation.columns
@@ -58,10 +72,25 @@ def drop_duplicate_columns(relation: duckdb.DuckDBPyRelation,
     return conn.query(query)
 
 
-def compare_df_cols(dj1: 'DuckJanitor', dj2: 'DuckJanitor',
-                 conn: Optional[duckdb.DuckDBPyConnection] = None) -> pd.DataFrame:
+def compare_df_cols(
+    dj1: "DuckJanitor", dj2: "DuckJanitor", conn: Optional[duckdb.DuckDBPyConnection] = None
+) -> pd.DataFrame:
     """
     Compare columns between two DuckJanitor instances.
+
+    Parameters
+    ----------
+    dj1 : DuckJanitor
+        First DuckJanitor instance.
+    dj2 : DuckJanitor
+        Second DuckJanitor instance.
+    conn : duckdb.DuckDBPyConnection, optional
+        DuckDB connection (unused; present for API symmetry).
+
+    Returns
+    -------
+    pandas.DataFrame
+        Single-row DataFrame with 'only_in_dj1', 'only_in_dj2', and 'in_both_same' lists.
     """
     cols1 = [(col, str(dtype)) for col, dtype in zip(dj1._relation.columns, dj1._relation.dtypes)]
     cols2 = [(col, str(dtype)) for col, dtype in zip(dj2._relation.columns, dj2._relation.dtypes)]
@@ -70,19 +99,44 @@ def compare_df_cols(dj1: 'DuckJanitor', dj2: 'DuckJanitor',
     set2 = set(cols2)
 
     comparison = {
-        'only_in_dj1': list(set1 - set2),
-        'only_in_dj2': list(set2 - set1),
-        'in_both_same': list(set1 & set2),
+        "only_in_dj1": list(set1 - set2),
+        "only_in_dj2": list(set2 - set1),
+        "in_both_same": list(set1 & set2),
     }
 
     return pd.DataFrame([comparison])
 
 
-def join_apply(self: 'DuckJanitor', other: 'DuckJanitor', on: Union[str, List[str]],
-               func: Callable, new_column_name: str,
-                 conn: Optional[duckdb.DuckDBPyConnection] = None) -> 'DuckJanitor':
+def join_apply(
+    self: "DuckJanitor",
+    other: "DuckJanitor",
+    on: Union[str, list[str]],
+    func: Callable,
+    new_column_name: str,
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> "DuckJanitor":
     """
     Perform join then apply Python function to each row.
+
+    Parameters
+    ----------
+    self : DuckJanitor
+        The left DuckJanitor instance.
+    other : DuckJanitor
+        The right DuckJanitor instance.
+    on : str or list of str
+        Join key column(s).
+    func : callable
+        Row-wise Python function applied to the joined DataFrame.
+    new_column_name : str
+        Name of the column to store ``func`` results.
+    conn : duckdb.DuckDBPyConnection, optional
+        DuckDB connection (uses ``self._connection`` if not provided).
+
+    Returns
+    -------
+    DuckJanitor
+        New instance wrapping the joined DataFrame with the new column.
     """
     if isinstance(on, str):
         on = [on]
@@ -103,7 +157,7 @@ def join_apply(self: 'DuckJanitor', other: 'DuckJanitor', on: Union[str, List[st
     except Exception:
         self._connection.register(temp_other, other._relation.df())
 
-    join_conditions = ' AND '.join(f'self.{_quote_id(col)} = other.{_quote_id(col)}' for col in on)
+    join_conditions = " AND ".join(f"self.{_quote_id(col)} = other.{_quote_id(col)}" for col in on)
 
     join_query = f"""
         SELECT * FROM {temp_self} self
@@ -119,11 +173,33 @@ def join_apply(self: 'DuckJanitor', other: 'DuckJanitor', on: Union[str, List[st
     return DuckJanitor.from_pandas(df)
 
 
-def process_text(self: 'DuckJanitor', column: str, func: Union[Callable, str],
-                 new_column_name: str,
-                 conn: Optional[duckdb.DuckDBPyConnection] = None) -> 'DuckJanitor':
+def process_text(
+    self: "DuckJanitor",
+    column: str,
+    func: Union[Callable, str],
+    new_column_name: str,
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> "DuckJanitor":
     """
     Apply text processing function to a column.
+
+    Parameters
+    ----------
+    self : DuckJanitor
+        The DuckJanitor instance.
+    column : str
+        Source text column.
+    func : callable or str
+        Python callable or SQL expression producing the processed value.
+    new_column_name : str
+        Name of the output column.
+    conn : duckdb.DuckDBPyConnection, optional
+        DuckDB connection (uses ``self._connection`` if not provided).
+
+    Returns
+    -------
+    DuckJanitor
+        New instance with the processed text column added.
     """
     _ensure_columns_exist(self._relation.columns, [column])
     if not isinstance(new_column_name, str) or not new_column_name.strip():
@@ -141,16 +217,36 @@ def process_text(self: 'DuckJanitor', column: str, func: Union[Callable, str],
 
 # ========== Final Phase 2 SQL Functions ==========
 
-_VALID_CONDITIONAL_OPS = frozenset({'<', '<=', '>', '>=', '=', '==', '!=', '<>'})
+_VALID_CONDITIONAL_OPS = frozenset({"<", "<=", ">", ">=", "=", "==", "!=", "<>"})
 
 
-def conditional_join(relation: duckdb.DuckDBPyRelation, other_relation: duckdb.DuckDBPyRelation,
-                     on: List[tuple], how: str = 'inner',
-                 conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def conditional_join(
+    relation: duckdb.DuckDBPyRelation,
+    other_relation: duckdb.DuckDBPyRelation,
+    on: list[tuple],
+    how: str = "inner",
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
-    Perform conditional (non-equi) joins between two relations using a single shared connection.
-    If the relations belong to different connections, the right relation is materialized and
-    re-registered on the provided connection.
+    Perform conditional (non-equi) joins between two relations.
+
+    Parameters
+    ----------
+    relation : duckdb.DuckDBPyRelation
+        The left relation.
+    other_relation : duckdb.DuckDBPyRelation
+        The right relation.
+    on : list of tuple
+        List of (left_col, right_col, op) predicates.
+    how : str
+        Join type: 'inner', 'left', 'right', 'full', or 'cross'.
+    conn : duckdb.DuckDBPyConnection, optional
+        DuckDB connection that owns the left relation.
+
+    Returns
+    -------
+    duckdb.DuckDBPyRelation
+        Joined relation.
     """
     if conn is None:
         raise ValueError(
@@ -170,11 +266,9 @@ def conditional_join(relation: duckdb.DuckDBPyRelation, other_relation: duckdb.D
         _ensure_columns_exist(other_relation.columns, [right_col])
         if op not in _VALID_CONDITIONAL_OPS:
             raise ValueError(f"Invalid operator: {op!r}. Use one of {_VALID_CONDITIONAL_OPS}")
-        conditions.append(
-            f'self.{_quote_id(left_col)} {op} other.{_quote_id(right_col)}'
-        )
+        conditions.append(f"self.{_quote_id(left_col)} {op} other.{_quote_id(right_col)}")
 
-    where_clause = ' AND '.join(conditions) if conditions else "TRUE"
+    where_clause = " AND ".join(conditions) if conditions else "TRUE"
 
     temp_self = f"_self_{id(relation)}"
     temp_other = f"_other_{id(other_relation)}"
@@ -194,11 +288,27 @@ def conditional_join(relation: duckdb.DuckDBPyRelation, other_relation: duckdb.D
     return conn.query(query)
 
 
-def get_dupes(relation: duckdb.DuckDBPyRelation,
-              columns: Optional[Union[str, List[str]]] = None,
-                 conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def get_dupes(
+    relation: duckdb.DuckDBPyRelation,
+    columns: Optional[Union[str, list[str]]] = None,
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Return duplicate rows.
+
+    Parameters
+    ----------
+    relation : duckdb.DuckDBPyRelation
+        The input relation.
+    columns : str or list of str, optional
+        Columns to consider for duplication; defaults to all.
+    conn : duckdb.DuckDBPyConnection, optional
+        DuckDB connection.
+
+    Returns
+    -------
+    duckdb.DuckDBPyRelation
+        Relation containing only rows appearing more than once.
     """
     table_name = _register_relation(conn, relation)
 
@@ -210,7 +320,7 @@ def get_dupes(relation: duckdb.DuckDBPyRelation,
         raise ValueError("columns must contain at least one column")
     _ensure_columns_exist(relation.columns, columns)
 
-    partition_cols = ', '.join(_quote_id(c) for c in columns)
+    partition_cols = ", ".join(_quote_id(c) for c in columns)
 
     query = f"""
         SELECT * EXCLUDE (_dup_count) FROM (
@@ -223,13 +333,30 @@ def get_dupes(relation: duckdb.DuckDBPyRelation,
     return conn.query(query)
 
 
-def dropnotnull(relation: duckdb.DuckDBPyRelation,
-                subset: Optional[Union[str, List[str]]] = None,
-                how: str = 'any',
-                 conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def dropnotnull(
+    relation: duckdb.DuckDBPyRelation,
+    subset: Optional[Union[str, list[str]]] = None,
+    how: str = "any",
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Remove rows where values are NOT null (keep nulls).
-    Inverse of dropna().
+
+    Parameters
+    ----------
+    relation : duckdb.DuckDBPyRelation
+        The input relation.
+    subset : str or list of str, optional
+        Columns to inspect; defaults to all.
+    how : str
+        'any' drops rows with any non-null in subset; 'all' drops only if all non-null.
+    conn : duckdb.DuckDBPyConnection, optional
+        DuckDB connection.
+
+    Returns
+    -------
+    duckdb.DuckDBPyRelation
+        Relation containing only rows with nulls in the inspected columns.
     """
     table_name = _register_relation(conn, relation)
 
@@ -241,23 +368,45 @@ def dropnotnull(relation: duckdb.DuckDBPyRelation,
         raise ValueError("subset must contain at least one column")
     _ensure_columns_exist(relation.columns, subset)
 
-    if how == 'any':
-        conditions = [f'{_quote_id(col)} IS NULL' for col in subset]
-        where_clause = ' OR '.join(conditions)
-    elif how == 'all':
-        conditions = [f'{_quote_id(col)} IS NULL' for col in subset]
-        where_clause = ' AND '.join(conditions)
+    if how == "any":
+        conditions = [f"{_quote_id(col)} IS NULL" for col in subset]
+        where_clause = " OR ".join(conditions)
+    elif how == "all":
+        conditions = [f"{_quote_id(col)} IS NULL" for col in subset]
+        where_clause = " AND ".join(conditions)
     else:
         raise ValueError("how must be 'any' or 'all'")
 
     return conn.query(f"SELECT * FROM {table_name} WHERE {where_clause}")
 
 
-def expand_column(relation: duckdb.DuckDBPyRelation, column: str,
-                  sep: str = '|', prefix: Optional[str] = None,
-                 conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def expand_column(
+    relation: duckdb.DuckDBPyRelation,
+    column: str,
+    sep: str = "|",
+    prefix: Optional[str] = None,
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Expand a delimited column into dummy variables.
+
+    Parameters
+    ----------
+    relation : duckdb.DuckDBPyRelation
+        The input relation.
+    column : str
+        Column containing delimited values.
+    sep : str
+        Delimiter separating values.
+    prefix : str, optional
+        Prefix for generated dummy columns; defaults to the source column name.
+    conn : duckdb.DuckDBPyConnection, optional
+        DuckDB connection.
+
+    Returns
+    -------
+    duckdb.DuckDBPyRelation
+        Relation with one dummy column per unique value.
     """
     table_name = _register_relation(conn, relation)
     _ensure_columns_exist(relation.columns, [column])
@@ -278,7 +427,7 @@ def expand_column(relation: duckdb.DuckDBPyRelation, column: str,
 
     dummy_exprs = []
     for val in unique_vals:
-        dummy_name = f"{prefix}_{val}".replace(' ', '_').replace('-', '_')
+        dummy_name = f"{prefix}_{val}".replace(" ", "_").replace("-", "_")
         dummy_expr = (
             f"CASE WHEN list_contains(str_split({col}, {sep_lit}), {_sql_literal(val)}) "
             f"THEN 1 ELSE 0 END AS {_quote_id(dummy_name)}"
@@ -291,12 +440,36 @@ def expand_column(relation: duckdb.DuckDBPyRelation, column: str,
     return conn.query(f"SELECT {', '.join(select_parts)} FROM {table_name}")
 
 
-def impute(relation: duckdb.DuckDBPyRelation, column: str,
-           value: Optional[Any] = None, statistic: str = 'mean',
-           group_by: Optional[Union[str, List[str]]] = None,
-                 conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def impute(
+    relation: duckdb.DuckDBPyRelation,
+    column: str,
+    value: Optional[Any] = None,
+    statistic: str = "mean",
+    group_by: Optional[Union[str, list[str]]] = None,
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Impute missing values using a specified value or statistic.
+
+    Parameters
+    ----------
+    relation : duckdb.DuckDBPyRelation
+        The input relation.
+    column : str
+        Column to impute.
+    value : scalar, optional
+        Literal value to fill; if provided, takes precedence over statistic.
+    statistic : str
+        One of 'mean', 'median', 'mode' (used when value is None).
+    group_by : str or list of str, optional
+        Columns to group by when computing the statistic.
+    conn : duckdb.DuckDBPyConnection, optional
+        DuckDB connection.
+
+    Returns
+    -------
+    duckdb.DuckDBPyRelation
+        Relation with missing values in ``column`` filled.
     """
     table_name = _register_relation(conn, relation)
     old_columns = relation.columns
@@ -316,11 +489,11 @@ def impute(relation: duckdb.DuckDBPyRelation, column: str,
         else:
             partition = ""
 
-        if statistic == 'mean':
+        if statistic == "mean":
             fill_expr = f"COALESCE({col}, AVG({col}) OVER ({partition})) AS {col}"
-        elif statistic == 'median':
+        elif statistic == "median":
             fill_expr = f"COALESCE({col}, MEDIAN({col}) OVER ({partition})) AS {col}"
-        elif statistic == 'mode':
+        elif statistic == "mode":
             fill_expr = f"COALESCE({col}, MODE({col}) OVER ({partition})) AS {col}"
         else:
             raise ValueError(f"Unknown statistic: {statistic}")
@@ -337,12 +510,36 @@ def impute(relation: duckdb.DuckDBPyRelation, column: str,
     return conn.query(query)
 
 
-def jitter(relation: duckdb.DuckDBPyRelation, column: str,
-           target_column: str, scale: float = 0.01,
-           seed: Optional[int] = None,
-                 conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def jitter(
+    relation: duckdb.DuckDBPyRelation,
+    column: str,
+    target_column: str,
+    scale: float = 0.01,
+    seed: Optional[int] = None,
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Add random noise (jitter) to a numeric column.
+
+    Parameters
+    ----------
+    relation : duckdb.DuckDBPyRelation
+        The input relation.
+    column : str
+        Source numeric column.
+    target_column : str
+        Name of the output jittered column.
+    scale : float
+        Noise scale as fraction of the column range.
+    seed : int, optional
+        Random seed for reproducibility.
+    conn : duckdb.DuckDBPyConnection, optional
+        DuckDB connection.
+
+    Returns
+    -------
+    duckdb.DuckDBPyRelation
+        Relation with the jittered column appended.
     """
     table_name = _register_relation(conn, relation)
     _ensure_columns_exist(relation.columns, [column])
@@ -364,11 +561,30 @@ def jitter(relation: duckdb.DuckDBPyRelation, column: str,
     return conn.query(f"SELECT *, {jitter_expr} FROM {table_name}")
 
 
-def label_encode(relation: duckdb.DuckDBPyRelation, columns: Union[str, List[str]],
-                 suffix: str = '_encoded',
-                 conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def label_encode(
+    relation: duckdb.DuckDBPyRelation,
+    columns: Union[str, list[str]],
+    suffix: str = "_encoded",
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Encode categorical columns with numerical labels.
+
+    Parameters
+    ----------
+    relation : duckdb.DuckDBPyRelation
+        The input relation.
+    columns : str or list of str
+        Column(s) to encode.
+    suffix : str
+        Suffix appended to encoded column names.
+    conn : duckdb.DuckDBPyConnection, optional
+        DuckDB connection.
+
+    Returns
+    -------
+    duckdb.DuckDBPyRelation
+        Relation with one additional encoded column per input column.
     """
     table_name = _register_relation(conn, relation)
 
@@ -390,12 +606,33 @@ def label_encode(relation: duckdb.DuckDBPyRelation, columns: Union[str, List[str
     return conn.query(f"SELECT {', '.join(select_parts)} FROM {table_name}")
 
 
-def find_replace(relation: duckdb.DuckDBPyRelation, column: str,
-                 value_pairs: Dict[Any, Any],
-                 target_column: Optional[str] = None,
-                 conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def find_replace(
+    relation: duckdb.DuckDBPyRelation,
+    column: str,
+    value_pairs: dict[Any, Any],
+    target_column: Optional[str] = None,
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Find and replace values in a column.
+
+    Parameters
+    ----------
+    relation : duckdb.DuckDBPyRelation
+        The input relation.
+    column : str
+        Source column whose values are matched.
+    value_pairs : dict
+        Mapping of old-value to new-value replacements.
+    target_column : str, optional
+        Output column name; defaults to ``column``.
+    conn : duckdb.DuckDBPyConnection, optional
+        DuckDB connection.
+
+    Returns
+    -------
+    duckdb.DuckDBPyRelation
+        Relation with replaced values in the target column.
     """
     table_name = _register_relation(conn, relation)
     old_columns = relation.columns
@@ -422,11 +659,30 @@ def find_replace(relation: duckdb.DuckDBPyRelation, column: str,
     return conn.query(f"SELECT {', '.join(select_parts)} FROM {table_name}")
 
 
-def count_cumulative_unique(relation: duckdb.DuckDBPyRelation, column: str,
-                            dest_column: str = 'cumulative_unique',
-                 conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def count_cumulative_unique(
+    relation: duckdb.DuckDBPyRelation,
+    column: str,
+    dest_column: str = "cumulative_unique",
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Return a column with the cumulative count of unique values.
+
+    Parameters
+    ----------
+    relation : duckdb.DuckDBPyRelation
+        The input relation.
+    column : str
+        Column whose unique values are counted.
+    dest_column : str
+        Name of the output cumulative-unique column.
+    conn : duckdb.DuckDBPyConnection, optional
+        DuckDB connection.
+
+    Returns
+    -------
+    duckdb.DuckDBPyRelation
+        Relation with the cumulative-unique count column appended.
     """
     table_name = _register_relation(conn, relation)
     _ensure_columns_exist(relation.columns, [column])
@@ -444,11 +700,30 @@ def count_cumulative_unique(relation: duckdb.DuckDBPyRelation, column: str,
     return conn.query(query)
 
 
-def complete(relation: duckdb.DuckDBPyRelation, columns: Union[str, List[str]],
-             fill_value: Any = None,
-                 conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def complete(
+    relation: duckdb.DuckDBPyRelation,
+    columns: Union[str, list[str]],
+    fill_value: Any = None,
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Expand relation to include all possible combinations of specified columns.
+
+    Parameters
+    ----------
+    relation : duckdb.DuckDBPyRelation
+        The input relation.
+    columns : str or list of str
+        Columns whose Cartesian product defines the expanded grid.
+    fill_value : scalar, optional
+        Value used for non-grid columns when no matching row exists.
+    conn : duckdb.DuckDBPyConnection, optional
+        DuckDB connection.
+
+    Returns
+    -------
+    duckdb.DuckDBPyRelation
+        Expanded relation with one row per combination of ``columns`` values.
     """
     table_name = _register_relation(conn, relation)
 
@@ -462,16 +737,23 @@ def complete(relation: duckdb.DuckDBPyRelation, columns: Union[str, List[str]],
     grid_parts = []
     for col in columns:
         col_quoted = _quote_id(col)
-        grid_parts.append(f"(SELECT DISTINCT {col_quoted} FROM {table_name} WHERE {col_quoted} IS NOT NULL)")
+        grid_parts.append(
+            f"(SELECT DISTINCT {col_quoted} FROM {table_name} WHERE {col_quoted} IS NOT NULL)"
+        )
 
     grid_query = " CROSS JOIN ".join(grid_parts)
 
-    join_conditions = " AND ".join(f"grid.{_quote_id(col)} = orig.{_quote_id(col)}" for col in columns)
+    join_conditions = " AND ".join(
+        f"grid.{_quote_id(col)} = orig.{_quote_id(col)}" for col in columns
+    )
 
     other_cols = [c for c in relation.columns if c not in columns]
     if other_cols:
         if fill_value is not None:
-            other_selects = ", ".join(f"COALESCE(orig.{_quote_id(c)}, {_sql_literal(fill_value)}) AS {_quote_id(c)}" for c in other_cols)
+            other_selects = ", ".join(
+                f"COALESCE(orig.{_quote_id(c)}, {_sql_literal(fill_value)}) AS {_quote_id(c)}"
+                for c in other_cols
+            )
         else:
             other_selects = ", ".join(f"orig.{_quote_id(c)} AS {_quote_id(c)}" for c in other_cols)
         select_list = ", ".join(f"grid.{_quote_id(col)}" for col in columns) + ", " + other_selects
@@ -490,10 +772,26 @@ def complete(relation: duckdb.DuckDBPyRelation, columns: Union[str, List[str]],
 
 # ========== DuckJanitor Method Wrappers (Hybrid Layer) ==========
 
-def also(self: 'DuckJanitor', func: Callable,
-                 conn: Optional[duckdb.DuckDBPyConnection] = None) -> 'DuckJanitor':
+
+def also(
+    self: "DuckJanitor", func: Callable, conn: Optional[duckdb.DuckDBPyConnection] = None
+) -> "DuckJanitor":
     """
     Apply a Python function with side effects.
+
+    Parameters
+    ----------
+    self : DuckJanitor
+        The DuckJanitor instance.
+    func : callable
+        Python function taking the materialized DataFrame.
+    conn : duckdb.DuckDBPyConnection, optional
+        DuckDB connection (unused; present for API symmetry).
+
+    Returns
+    -------
+    DuckJanitor
+        New instance wrapping the func result (or the original DataFrame if func returns None).
     """
     df = self.collect()
     result = func(df)
@@ -503,10 +801,27 @@ def also(self: 'DuckJanitor', func: Callable,
     return DuckJanitor.from_pandas(df)
 
 
-def alias(relation: duckdb.DuckDBPyRelation, alias: Union[str, Callable],
-          conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def alias(
+    relation: duckdb.DuckDBPyRelation,
+    alias: Union[str, Callable],
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Rename all columns using a string or callable.
+
+    Parameters
+    ----------
+    relation : duckdb.DuckDBPyRelation
+        The input relation.
+    alias : str or callable
+        Base name (suffixed with index for multi-column relations) or a callable mapping each column name to a new name.
+    conn : duckdb.DuckDBPyConnection, optional
+        DuckDB connection.
+
+    Returns
+    -------
+    duckdb.DuckDBPyRelation
+        Relation with renamed columns.
     """
     df_cols = relation.columns
 
@@ -515,7 +830,7 @@ def alias(relation: duckdb.DuckDBPyRelation, alias: Union[str, Callable],
             raise ValueError("alias must be a non-empty string")
         # Rename all columns to the same base name with unique suffixes if there's more than one
         new_columns = []
-        for i, col in enumerate(df_cols):
+        for i, _col in enumerate(df_cols):
             if len(df_cols) == 1:
                 new_columns.append(alias)
             else:
@@ -528,16 +843,33 @@ def alias(relation: duckdb.DuckDBPyRelation, alias: Union[str, Callable],
         raise ValueError("alias must be a string or callable")
 
     # Rename them using SELECT AS
-    select_parts = [f'{_quote_id(old)} AS {_quote_id(new)}' for old, new in zip(df_cols, new_columns)]
+    select_parts = [
+        f"{_quote_id(old)} AS {_quote_id(new)}" for old, new in zip(df_cols, new_columns)
+    ]
     table_name = _register_relation(conn, relation)
     query = f"SELECT {', '.join(select_parts)} FROM {table_name}"
     return conn.query(query)
 
 
-def mutate(self: 'DuckJanitor',
-                 conn: Optional[duckdb.DuckDBPyConnection] = None, **kwargs) -> 'DuckJanitor':
+def mutate(
+    self: "DuckJanitor", conn: Optional[duckdb.DuckDBPyConnection] = None, **kwargs
+) -> "DuckJanitor":
     """
-    Create or modify columns using a dictionary.
+    Create or modify columns using keyword arguments.
+
+    Parameters
+    ----------
+    self : DuckJanitor
+        The DuckJanitor instance.
+    conn : duckdb.DuckDBPyConnection, optional
+        DuckDB connection (unused; present for API symmetry).
+    **kwargs
+        Mapping of new/updated column name to scalar, list, or SQL expression.
+
+    Returns
+    -------
+    DuckJanitor
+        New instance with all ``**kwargs`` columns added.
     """
     result = self
     for col_name, value in kwargs.items():

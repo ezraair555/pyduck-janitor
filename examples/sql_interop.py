@@ -5,26 +5,28 @@ This example demonstrates the interoperability between
 janitor cleaning methods and custom SQL queries.
 """
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 from pyduck_janitor import DuckJanitor
 
 # Create sample sales data
 np.random.seed(42)
 n = 1000
 
-data = pd.DataFrame({
-    'SaleDate': pd.date_range('2023-01-01', periods=n, freq='D'),
-    'Product': np.random.choice(['Widget A', 'Widget B', 'Widget C'], n),
-    'Region': np.random.choice(['North', 'South', 'East', 'West'], n),
-    'SalesRep': np.random.choice(['Alice', 'Bob', 'Charlie', 'Diana'], n),
-    'Quantity': np.random.randint(1, 100, n),
-    'UnitPrice': np.random.uniform(10, 100, n),
-    'Discount': np.random.uniform(0, 0.3, n),
-})
+data = pd.DataFrame(
+    {
+        "SaleDate": pd.date_range("2023-01-01", periods=n, freq="D"),
+        "Product": np.random.choice(["Widget A", "Widget B", "Widget C"], n),
+        "Region": np.random.choice(["North", "South", "East", "West"], n),
+        "SalesRep": np.random.choice(["Alice", "Bob", "Charlie", "Diana"], n),
+        "Quantity": np.random.randint(1, 100, n),
+        "UnitPrice": np.random.uniform(10, 100, n),
+        "Discount": np.random.uniform(0, 0.3, n),
+    }
+)
 
 # Add some missing values
-data.loc[np.random.choice(n, 50), 'Quantity'] = np.nan
+data.loc[np.random.choice(n, 50), "Quantity"] = np.nan
 
 print("Original data:")
 print(data.head())
@@ -34,16 +36,15 @@ print(f"\nShape: {data.shape}")
 dj = DuckJanitor.from_pandas(data)
 
 # Example 1: Clean then SQL
-print("\n" + "="*60)
+print("\n" + "=" * 60)
 print("Example 1: Clean data, then run custom SQL")
-print("="*60)
+print("=" * 60)
 
 cleaned_then_sql = (
-    dj
-    .clean_names()
-    .dropna(subset=['quantity'])
+    dj.clean_names()
+    .dropna(subset=["quantity"])
     .sql("""
-        SELECT 
+        SELECT
             product,
             region,
             SUM(quantity * unitprice * (1 - discount)) as revenue,
@@ -55,18 +56,17 @@ cleaned_then_sql = (
 )
 
 result1 = cleaned_then_sql.collect()
-print(f"\nRevenue by product and region:")
+print("\nRevenue by product and region:")
 print(result1)
 
 # Example 2: SQL then clean
-print("\n" + "="*60)
+print("\n" + "=" * 60)
 print("Example 2: Run SQL, then clean")
-print("="*60)
+print("=" * 60)
 
 sql_then_clean = (
-    dj
-    .sql("""
-        SELECT 
+    dj.sql("""
+        SELECT
             salesrep,
             DATE_TRUNC('month', saledate) as sale_month,
             SUM(quantity * unitprice * (1 - discount)) as revenue
@@ -75,35 +75,37 @@ sql_then_clean = (
         GROUP BY salesrep, DATE_TRUNC('month', saledate)
     """)
     .clean_names()
-    .add_column('performance_tier', """
-        CASE 
+    .add_column(
+        "performance_tier",
+        """
+        CASE
             WHEN revenue > 10000 THEN 'high'
             WHEN revenue > 5000 THEN 'medium'
             ELSE 'low'
         END
-    """)
+    """,
+    )
 )
 
 result2 = sql_then_clean.collect()
-print(f"\nSales rep performance by month:")
+print("\nSales rep performance by month:")
 print(result2.head(15))
 
 # Example 3: Multiple SQL passes with cleaning
-print("\n" + "="*60)
+print("\n" + "=" * 60)
 print("Example 3: Multiple SQL passes with cleaning in between")
-print("="*60)
+print("=" * 60)
 
 multi_pass = (
-    dj
-    .clean_names()
+    dj.clean_names()
     .sql("""
         SELECT *,
             quantity * unitprice * (1 - discount) as net_revenue
         FROM self
     """)
-    .filter_column('net_revenue', 'net_revenue > 100')
+    .filter_column("net_revenue", "net_revenue > 100")
     .sql("""
-        SELECT 
+        SELECT
             salesrep,
             product,
             COUNT(*) as deals,
@@ -112,28 +114,27 @@ multi_pass = (
         FROM self
         GROUP BY salesrep, product
     """)
-    .rename_column('deals', 'deal_count')
-    .add_column('revenue_per_deal', 'total_revenue / deal_count')
+    .rename_column("deals", "deal_count")
+    .add_column("revenue_per_deal", "total_revenue / deal_count")
 )
 
 result3 = multi_pass.collect()
-print(f"\nSales rep by product analysis:")
+print("\nSales rep by product analysis:")
 print(result3)
 
 # Example 4: Window functions with cleaning
-print("\n" + "="*60)
+print("\n" + "=" * 60)
 print("Example 4: Window functions in SQL with janitor cleaning")
-print("="*60)
+print("=" * 60)
 
 window_analysis = (
-    dj
-    .clean_names()
-    .dropna(subset=['quantity'])
+    dj.clean_names()
+    .dropna(subset=["quantity"])
     .sql("""
-        SELECT 
+        SELECT
             *,
             SUM(quantity * unitprice * (1 - discount)) OVER (
-                PARTITION BY salesrep 
+                PARTITION BY salesrep
                 ORDER BY saledate
                 ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
             ) as rolling_7day_revenue,
@@ -144,24 +145,25 @@ window_analysis = (
             ) as rolling_30day_avg_revenue
         FROM self
     """)
-    .filter_column('rolling_7day_revenue', 'rolling_7day_revenue > 500')
+    .filter_column("rolling_7day_revenue", "rolling_7day_revenue > 500")
 )
 
 result4 = window_analysis.head(20)
-print(f"\nRolling revenue analysis:")
-print(result4[['saledate', 'salesrep', 'region', 'rolling_7day_revenue', 'rolling_30day_avg_revenue']])
+print("\nRolling revenue analysis:")
+print(
+    result4[["saledate", "salesrep", "region", "rolling_7day_revenue", "rolling_30day_avg_revenue"]]
+)
 
 # Example 5: CTEs with cleaning
-print("\n" + "="*60)
+print("\n" + "=" * 60)
 print("Example 5: Common Table Expressions (CTEs) with cleaning")
-print("="*60)
+print("=" * 60)
 
 cte_example = (
-    dj
-    .clean_names()
+    dj.clean_names()
     .sql("""
         WITH monthly_sales AS (
-            SELECT 
+            SELECT
                 salesrep,
                 DATE_TRUNC('month', saledate) as month,
                 SUM(quantity * unitprice * (1 - discount)) as monthly_revenue
@@ -170,13 +172,13 @@ cte_example = (
             GROUP BY salesrep, DATE_TRUNC('month', saledate)
         ),
         rep_averages AS (
-            SELECT 
+            SELECT
                 salesrep,
                 AVG(monthly_revenue) as avg_monthly_revenue
             FROM monthly_sales
             GROUP BY salesrep
         )
-        SELECT 
+        SELECT
             m.salesrep,
             m.month,
             m.monthly_revenue,
@@ -186,22 +188,25 @@ cte_example = (
         JOIN rep_averages r ON m.salesrep = r.salesrep
         ORDER BY ABS(pct_deviation) DESC
     """)
-    .add_column('performance_flag', """
-        CASE 
+    .add_column(
+        "performance_flag",
+        """
+        CASE
             WHEN pct_deviation > 20 THEN 'exceptional'
             WHEN pct_deviation < -20 THEN 'concerning'
             ELSE 'normal'
         END
-    """)
+    """,
+    )
 )
 
 result5 = cte_example.collect()
-print(f"\nSales rep performance deviations:")
+print("\nSales rep performance deviations:")
 print(result5.head(15))
 
-print("\n" + "="*60)
+print("\n" + "=" * 60)
 print("Example completed successfully!")
-print("="*60)
+print("=" * 60)
 print("\nKey takeaways:")
 print("- Mix janitor methods with custom SQL freely")
 print("- Use 'self' to reference the current relation in SQL")

@@ -5,9 +5,11 @@ This module provides the actual implementation of data cleaning operations
 using DuckDB SQL expressions.
 """
 
-import duckdb
-from typing import Optional, Union, List, Any, Callable, Iterable
 import re
+from collections.abc import Iterable
+from typing import Any, Callable, Optional, Union
+
+import duckdb
 
 
 def _quote_id(name: str) -> str:
@@ -18,7 +20,7 @@ def _quote_id(name: str) -> str:
 def _sql_literal(value: Any) -> str:
     """Return a safely quoted SQL literal."""
     if value is None:
-        return 'NULL'
+        return "NULL"
     if isinstance(value, bool):
         return str(value).upper()
     if isinstance(value, (int, float)):
@@ -26,26 +28,27 @@ def _sql_literal(value: Any) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def _register_relation(conn: Optional[duckdb.DuckDBPyConnection],
-                       relation: duckdb.DuckDBPyRelation) -> str:
+def _register_relation(
+    conn: Optional[duckdb.DuckDBPyConnection], relation: duckdb.DuckDBPyRelation
+) -> str:
     """Register *relation* on *conn* and return the temporary SQL name."""
     if conn is None:
         raise ValueError(
             "A DuckDB connection is required. Pass the connection that owns the relation."
         )
-    table_name = f'_temp_{id(relation)}'
+    table_name = f"_temp_{id(relation)}"
     conn.register(table_name, relation)
     return table_name
 
 
-def _ensure_columns_exist(available_columns: Iterable[str], requested_columns: Iterable[str]) -> None:
+def _ensure_columns_exist(
+    available_columns: Iterable[str], requested_columns: Iterable[str]
+) -> None:
     """Raise ValueError when any requested column is missing."""
     available = list(available_columns)
     missing = [column for column in requested_columns if column not in available]
     if missing:
-        raise ValueError(
-            f"Unknown column(s): {missing}. Available columns: {available}"
-        )
+        raise ValueError(f"Unknown column(s): {missing}. Available columns: {available}")
 
 
 def _strip_sql_literals(text: str) -> str:
@@ -105,13 +108,17 @@ def _validate_sql_fragment(fragment: str, context: str = "SQL expression") -> No
             )
 
 
-def clean_names(relation: duckdb.DuckDBPyRelation, strip_underscores: bool = True,
-                case_type: str = 'lower', remove_special: bool = True,
-                snakecase: bool = True,
-                conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def clean_names(
+    relation: duckdb.DuckDBPyRelation,
+    strip_underscores: bool = True,
+    case_type: str = "lower",
+    remove_special: bool = True,
+    snakecase: bool = True,
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Clean column names.
-    
+
     Parameters
     ----------
     relation : duckdb.DuckDBPyRelation
@@ -124,7 +131,7 @@ def clean_names(relation: duckdb.DuckDBPyRelation, strip_underscores: bool = Tru
         Remove special characters.
     snakecase : bool
         Convert to snake_case.
-        
+
     Returns
     -------
     duckdb.DuckDBPyRelation
@@ -139,37 +146,37 @@ def clean_names(relation: duckdb.DuckDBPyRelation, strip_underscores: bool = Tru
         new_name = col
 
         if strip_underscores:
-            new_name = new_name.strip('_')
+            new_name = new_name.strip("_")
 
         if remove_special:
             # Replace special chars with underscore first, then remove consecutive underscores
-            new_name = re.sub(r'[^a-zA-Z0-9]', '_', new_name)
+            new_name = re.sub(r"[^a-zA-Z0-9]", "_", new_name)
             # Remove consecutive underscores
-            new_name = re.sub(r'_+', '_', new_name)
+            new_name = re.sub(r"_+", "_", new_name)
             # Strip leading/trailing underscores
-            new_name = new_name.strip('_')
+            new_name = new_name.strip("_")
 
         # Handle snakecase - only for camelCase, not all-caps
         if snakecase:
             # Add underscores before uppercase letters (camelCase detection)
             # Only if there are lowercase letters (to avoid splitting all-caps like "CITY")
             if any(c.islower() for c in new_name):
-                new_name = re.sub(r'(?<!^)(?=[A-Z])', '_', new_name)
-            new_name = new_name.replace(' ', '_').replace('-', '_')
+                new_name = re.sub(r"(?<!^)(?=[A-Z])", "_", new_name)
+            new_name = new_name.replace(" ", "_").replace("-", "_")
 
         if remove_special:
             # Replace special chars with underscore first
-            new_name = re.sub(r'[^a-zA-Z0-9]', '_', new_name)
+            new_name = re.sub(r"[^a-zA-Z0-9]", "_", new_name)
             # Remove consecutive underscores
-            new_name = re.sub(r'_+', '_', new_name)
+            new_name = re.sub(r"_+", "_", new_name)
 
-        if case_type == 'lower':
+        if case_type == "lower":
             new_name = new_name.lower()
-        elif case_type == 'upper':
+        elif case_type == "upper":
             new_name = new_name.upper()
 
         # Strip leading/trailing underscores
-        new_name = new_name.strip('_')
+        new_name = new_name.strip("_")
 
         # Handle duplicate names
         base_name = new_name
@@ -183,33 +190,35 @@ def clean_names(relation: duckdb.DuckDBPyRelation, strip_underscores: bool = Tru
         new_columns.append((col, new_name))
 
     # Build SELECT statement with renamed columns
-    select_parts = [f'{_quote_id(old)} AS {_quote_id(new)}' for old, new in new_columns]
+    select_parts = [f"{_quote_id(old)} AS {_quote_id(new)}" for old, new in new_columns]
     table_name = _register_relation(conn, relation)
     query = f"SELECT {', '.join(select_parts)} FROM {table_name}"
 
     return conn.query(query)
 
 
-def remove_columns(relation: duckdb.DuckDBPyRelation,
-                   columns: Union[str, List[str]],
-                   conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def remove_columns(
+    relation: duckdb.DuckDBPyRelation,
+    columns: Union[str, list[str]],
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Remove specified columns.
-    
+
     Parameters
     ----------
     relation : duckdb.DuckDBPyRelation
         The input relation.
     columns : str or list of str
         Column name(s) to remove.
-        
+
     Returns
     -------
     duckdb.DuckDBPyRelation
         Relation with columns removed.
     """
     # conn = conn or duckdb.connect()  # Removed: relation is bound to its connection
-    
+
     if isinstance(columns, str):
         columns = [columns]
     if not columns:
@@ -218,24 +227,27 @@ def remove_columns(relation: duckdb.DuckDBPyRelation,
     old_columns = relation.columns
     _ensure_columns_exist(old_columns, columns)
     keep_columns = [col for col in old_columns if col not in columns]
-    
+
     if not keep_columns:
         raise ValueError("Cannot remove all columns")
-    
+
     select_parts = [_quote_id(col) for col in keep_columns]
     table_name = _register_relation(conn, relation)
     query = f"SELECT {', '.join(select_parts)} FROM {table_name}"
-    
+
     return conn.query(query)
 
 
-def add_column(relation: duckdb.DuckDBPyRelation, column_name: str,
-               values: Union[Any, List[Any], str],
-               fill_value: Optional[Any] = None,
-                conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def add_column(
+    relation: duckdb.DuckDBPyRelation,
+    column_name: str,
+    values: Union[Any, list[Any], str],
+    fill_value: Optional[Any] = None,
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Add a new column.
-    
+
     Parameters
     ----------
     relation : duckdb.DuckDBPyRelation
@@ -246,13 +258,13 @@ def add_column(relation: duckdb.DuckDBPyRelation, column_name: str,
         Values for the column.
     fill_value : scalar, optional
         Fill value if values is shorter.
-        
+
     Returns
     -------
     duckdb.DuckDBPyRelation
         Relation with new column added.
     """
-    
+
     if not isinstance(column_name, str) or not column_name.strip():
         raise ValueError("column_name must be a non-empty string")
 
@@ -286,7 +298,7 @@ def add_column(relation: duckdb.DuckDBPyRelation, column_name: str,
                 values = values + [fill_value] * (len(df) - len(values))
             else:
                 values = values + [None] * (len(df) - len(values))
-        df[column_name] = values[:len(df)]
+        df[column_name] = values[: len(df)]
         return conn.from_df(df)
     else:
         # Scalar value
@@ -296,12 +308,15 @@ def add_column(relation: duckdb.DuckDBPyRelation, column_name: str,
         return conn.query(query)
 
 
-def rename_column(relation: duckdb.DuckDBPyRelation, old_name: str,
-                  new_name: str,
-                    conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def rename_column(
+    relation: duckdb.DuckDBPyRelation,
+    old_name: str,
+    new_name: str,
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Rename a column.
-    
+
     Parameters
     ----------
     relation : duckdb.DuckDBPyRelation
@@ -310,7 +325,7 @@ def rename_column(relation: duckdb.DuckDBPyRelation, old_name: str,
         Current column name.
     new_name : str
         New column name.
-        
+
     Returns
     -------
     duckdb.DuckDBPyRelation
@@ -318,31 +333,34 @@ def rename_column(relation: duckdb.DuckDBPyRelation, old_name: str,
     """
     # conn = conn or duckdb.connect()  # Removed: relation is bound to its connection
     old_columns = relation.columns
-    
+
     if old_name not in old_columns:
         raise ValueError(f"Column '{old_name}' not found")
     if not isinstance(new_name, str) or not new_name.strip():
         raise ValueError("new_name must be a non-empty string")
-    
+
     select_parts = []
     for col in old_columns:
         if col == old_name:
-            select_parts.append(f'{_quote_id(col)} AS {_quote_id(new_name)}')
+            select_parts.append(f"{_quote_id(col)} AS {_quote_id(new_name)}")
         else:
             select_parts.append(_quote_id(col))
-    
+
     table_name = _register_relation(conn, relation)
     query = f"SELECT {', '.join(select_parts)} FROM {table_name}"
-    
+
     return conn.query(query)
 
 
-def dropna(relation: duckdb.DuckDBPyRelation, subset: Optional[Union[str, List[str]]] = None,
-           how: str = 'any',
-                    conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def dropna(
+    relation: duckdb.DuckDBPyRelation,
+    subset: Optional[Union[str, list[str]]] = None,
+    how: str = "any",
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Remove rows with missing values.
-    
+
     Parameters
     ----------
     relation : duckdb.DuckDBPyRelation
@@ -351,14 +369,14 @@ def dropna(relation: duckdb.DuckDBPyRelation, subset: Optional[Union[str, List[s
         Column(s) to check.
     how : str
         'any' or 'all'.
-        
+
     Returns
     -------
     duckdb.DuckDBPyRelation
         Relation with missing values removed.
     """
     table_name = _register_relation(conn, relation)
-    
+
     if subset is None:
         subset = relation.columns
     elif isinstance(subset, str):
@@ -366,33 +384,34 @@ def dropna(relation: duckdb.DuckDBPyRelation, subset: Optional[Union[str, List[s
     if not subset:
         raise ValueError("subset must contain at least one column")
     _ensure_columns_exist(relation.columns, subset)
-    
-    if how == 'any':
+
+    if how == "any":
         # Keep rows where ALL checked columns are non-null.
-        conditions = [f'{_quote_id(col)} IS NOT NULL' for col in subset]
-        where_clause = ' AND '.join(conditions)
-    elif how == 'all':
+        conditions = [f"{_quote_id(col)} IS NOT NULL" for col in subset]
+        where_clause = " AND ".join(conditions)
+    elif how == "all":
         # Keep rows where NOT ALL checked columns are null.
-        null_conditions = [f'{_quote_id(col)} IS NULL' for col in subset]
-        where_clause = 'NOT (' + ' AND '.join(null_conditions) + ')'
+        null_conditions = [f"{_quote_id(col)} IS NULL" for col in subset]
+        where_clause = "NOT (" + " AND ".join(null_conditions) + ")"
     else:
         raise ValueError("how must be 'any' or 'all'")
-    
+
     query = f"SELECT * FROM {table_name} WHERE {where_clause}"
-    
+
     return conn.query(query)
 
 
-def remove_empty(relation: duckdb.DuckDBPyRelation,
-                 conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def remove_empty(
+    relation: duckdb.DuckDBPyRelation, conn: Optional[duckdb.DuckDBPyConnection] = None
+) -> duckdb.DuckDBPyRelation:
     """
     Remove empty rows and columns.
-    
+
     Parameters
     ----------
     relation : duckdb.DuckDBPyRelation
         The input relation.
-        
+
     Returns
     -------
     duckdb.DuckDBPyRelation
@@ -422,19 +441,22 @@ def remove_empty(relation: duckdb.DuckDBPyRelation,
         f"({_quote_id(col)} IS NOT NULL AND CAST({_quote_id(col)} AS VARCHAR) != '')"
         for col in non_empty_cols
     ]
-    where_clause = ' OR '.join(row_conditions)
+    where_clause = " OR ".join(row_conditions)
 
     query = f"SELECT {', '.join(select_parts)} FROM {table_name} WHERE {where_clause}"
 
     return conn.query(query)
 
 
-def filter_column(relation: duckdb.DuckDBPyRelation, column: str,
-                  criteria: Union[Callable, str],
-                  conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def filter_column(
+    relation: duckdb.DuckDBPyRelation,
+    column: str,
+    criteria: Union[Callable, str],
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Filter rows based on column values.
-    
+
     Parameters
     ----------
     relation : duckdb.DuckDBPyRelation
@@ -443,7 +465,7 @@ def filter_column(relation: duckdb.DuckDBPyRelation, column: str,
         Column to filter on.
     criteria : callable or str
         Filter criteria.
-        
+
     Returns
     -------
     duckdb.DuckDBPyRelation
@@ -452,16 +474,16 @@ def filter_column(relation: duckdb.DuckDBPyRelation, column: str,
     _ensure_columns_exist(relation.columns, [column])
     if callable(criteria):
         if conn is None:
-            raise ValueError(
-                "A DuckDB connection is required when using a callable criteria."
-            )
+            raise ValueError("A DuckDB connection is required when using a callable criteria.")
         df = relation.df()
         mask = criteria(df[column])
         if len(mask) != len(df):
-            raise ValueError("Callable criteria must return a mask with the same row count as the input relation.")
+            raise ValueError(
+                "Callable criteria must return a mask with the same row count as the input relation."
+            )
         df = df[mask]
         return conn.from_df(df)
-    
+
     table_name = _register_relation(conn, relation)
     if isinstance(criteria, str):
         _validate_sql_fragment(criteria, context="Filter criteria")
@@ -481,12 +503,15 @@ def filter_column(relation: duckdb.DuckDBPyRelation, column: str,
     return conn.query(query)
 
 
-def coalesce(relation: duckdb.DuckDBPyRelation, columns: List[str],
-             target_column: str,
-                conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def coalesce(
+    relation: duckdb.DuckDBPyRelation,
+    columns: list[str],
+    target_column: str,
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Coalesce multiple columns into a single column.
-    
+
     Parameters
     ----------
     relation : duckdb.DuckDBPyRelation
@@ -495,7 +520,7 @@ def coalesce(relation: duckdb.DuckDBPyRelation, columns: List[str],
         Columns to coalesce.
     target_column : str
         Name of resulting column.
-        
+
     Returns
     -------
     duckdb.DuckDBPyRelation
@@ -508,7 +533,9 @@ def coalesce(relation: duckdb.DuckDBPyRelation, columns: List[str],
     if not isinstance(target_column, str) or not target_column.strip():
         raise ValueError("target_column must be a non-empty string")
 
-    coalesce_expr = f"COALESCE({', '.join(_quote_id(col) for col in columns)}) AS {_quote_id(target_column)}"
+    coalesce_expr = (
+        f"COALESCE({', '.join(_quote_id(col) for col in columns)}) AS {_quote_id(target_column)}"
+    )
 
     # Get all columns except the ones being coalesced and the target column itself (if it already exists)
     old_columns = relation.columns
@@ -520,12 +547,15 @@ def coalesce(relation: duckdb.DuckDBPyRelation, columns: List[str],
     return conn.query(query)
 
 
-def encode_categorical(relation: duckdb.DuckDBPyRelation, column: str,
-                       col_name: Optional[str] = None,
-                    conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def encode_categorical(
+    relation: duckdb.DuckDBPyRelation,
+    column: str,
+    col_name: Optional[str] = None,
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Encode a column as categorical (factorize).
-    
+
     Parameters
     ----------
     relation : duckdb.DuckDBPyRelation
@@ -534,7 +564,7 @@ def encode_categorical(relation: duckdb.DuckDBPyRelation, column: str,
         Column to encode.
     col_name : str, optional
         New column name.
-        
+
     Returns
     -------
     duckdb.DuckDBPyRelation
@@ -542,28 +572,31 @@ def encode_categorical(relation: duckdb.DuckDBPyRelation, column: str,
     """
     table_name = _register_relation(conn, relation)
     _ensure_columns_exist(relation.columns, [column])
-    
+
     if col_name is None:
         col_name = f"{column}_cat"
-    
+
     # Use DENSE_RANK to create categorical codes
     encode_expr = f"DENSE_RANK() OVER (ORDER BY {_quote_id(column)}) - 1 AS {_quote_id(col_name)}"
-    
+
     old_columns = relation.columns
     other_cols = [col for col in old_columns if col != column]
-    
+
     select_parts = [_quote_id(col) for col in other_cols] + [encode_expr]
     query = f"SELECT {', '.join(select_parts)} FROM {table_name}"
-    
+
     return conn.query(query)
 
 
-def get_dummies(relation: duckdb.DuckDBPyRelation, columns: Union[str, List[str]],
-                prefix: Optional[str] = None,
-                    conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def get_dummies(
+    relation: duckdb.DuckDBPyRelation,
+    columns: Union[str, list[str]],
+    prefix: Optional[str] = None,
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     One-hot encode categorical columns.
-    
+
     Parameters
     ----------
     relation : duckdb.DuckDBPyRelation
@@ -572,56 +605,58 @@ def get_dummies(relation: duckdb.DuckDBPyRelation, columns: Union[str, List[str]
         Column(s) to encode.
     prefix : str, optional
         Prefix for dummy columns.
-        
+
     Returns
     -------
     duckdb.DuckDBPyRelation
         Relation with dummy columns.
     """
     table_name = _register_relation(conn, relation)
-    
+
     if isinstance(columns, str):
         columns = [columns]
     if not columns:
         raise ValueError("columns must contain at least one column")
     _ensure_columns_exist(relation.columns, columns)
-    
+
     # Get unique values for each column
     all_dummies = []
     old_columns = relation.columns
-    
+
     for col in columns:
-        query = f"SELECT DISTINCT {_quote_id(col)} FROM {table_name} WHERE {_quote_id(col)} IS NOT NULL"
+        query = (
+            f"SELECT DISTINCT {_quote_id(col)} FROM {table_name} WHERE {_quote_id(col)} IS NOT NULL"
+        )
         unique_vals = [row[0] for row in conn.execute(query).fetchall()]
-        
+
         for val in unique_vals:
-            if prefix:
-                dummy_name = f"{prefix}_{col}_{val}"
-            else:
-                dummy_name = f"{col}_{val}"
-            
+            dummy_name = f"{prefix}_{col}_{val}" if prefix else f"{col}_{val}"
+
             # Clean the name (remove spaces, special chars)
-            dummy_name = re.sub(r'[^a-zA-Z0-9_]', '_', str(dummy_name))
-            
+            dummy_name = re.sub(r"[^a-zA-Z0-9_]", "_", str(dummy_name))
+
             # Create CASE expression for dummy variable
             case_expr = (
                 f"CASE WHEN {_quote_id(col)} = {_sql_literal(val)} THEN 1 ELSE 0 END "
                 f"AS {_quote_id(dummy_name)}"
             )
-            
+
             all_dummies.append(case_expr)
-    
+
     # Keep non-encoded columns
     other_cols = [col for col in old_columns if col not in columns]
     select_parts = [_quote_id(col) for col in other_cols] + all_dummies
-    
+
     query = f"SELECT {', '.join(select_parts)} FROM {table_name}"
 
     return conn.query(query)
 
 
-def select_columns(relation: duckdb.DuckDBPyRelation, columns: Union[str, List[str]],
-                   conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def select_columns(
+    relation: duckdb.DuckDBPyRelation,
+    columns: Union[str, list[str]],
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Select specific columns from the relation.
 
@@ -648,8 +683,8 @@ def select_columns(relation: duckdb.DuckDBPyRelation, columns: Union[str, List[s
     duckdb.DuckDBPyRelation
         Relation with selected columns.
     """
-    import re as _re
     import fnmatch as _fnmatch
+    import re as _re
 
     table_name = _register_relation(conn, relation)
 
@@ -664,33 +699,28 @@ def select_columns(relation: duckdb.DuckDBPyRelation, columns: Union[str, List[s
         if isinstance(spec, DropLabel):
             excludes.append(spec.label)
         elif isinstance(spec, str):
-            if spec.startswith('re:'):
+            if spec.startswith("re:"):
                 pattern = _re.compile(spec[3:])
                 includes.extend(c for c in relation.columns if pattern.search(c))
-            elif ',' in spec or '*' in spec or '?' in spec:
+            elif "," in spec or "*" in spec or "?" in spec:
                 tokens = (
-                    [t.strip() for t in spec.split(',') if t.strip()]
-                    if ',' in spec else [spec]
+                    [t.strip() for t in spec.split(",") if t.strip()] if "," in spec else [spec]
                 )
                 for tok in tokens:
                     if isinstance(tok, DropLabel):
                         excludes.append(tok.label)
-                    elif any(g in tok for g in ('*', '?', '[')):
-                        includes.extend(
-                            c for c in relation.columns
-                            if _fnmatch.fnmatchcase(c, tok)
-                        )
+                    elif any(g in tok for g in ("*", "?", "[")):
+                        includes.extend(c for c in relation.columns if _fnmatch.fnmatchcase(c, tok))
                     else:
                         includes.append(tok)
                 if not includes and not excludes:
-                    raise ValueError(
-                        f'select_columns(): no columns match pattern {spec!r}'
-                    )
+                    raise ValueError(f"select_columns(): no columns match pattern {spec!r}")
             else:
                 includes.append(spec)
-        elif hasattr(spec, '__iter__') and not isinstance(spec, (dict, set)):
+        elif hasattr(spec, "__iter__") and not isinstance(spec, (dict, set)):
             for entry in spec:
                 _collect(entry)
+
     _collect_result = None  # noqa: F841 (clarity placeholder)
     if isinstance(columns, (str, DropLabel)):
         _collect(columns)
@@ -727,12 +757,15 @@ def select_columns(relation: duckdb.DuckDBPyRelation, columns: Union[str, List[s
     return conn.query(query)
 
 
-def select_rows(relation: duckdb.DuckDBPyRelation, indices: Optional[Union[List[int], str]] = None,
-                criteria: Optional[str] = None,
-                conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def select_rows(
+    relation: duckdb.DuckDBPyRelation,
+    indices: Optional[Union[list[int], str]] = None,
+    criteria: Optional[str] = None,
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Select specific rows by index or condition.
-    
+
     Parameters
     ----------
     relation : duckdb.DuckDBPyRelation
@@ -743,14 +776,14 @@ def select_rows(relation: duckdb.DuckDBPyRelation, indices: Optional[Union[List[
         SQL WHERE clause condition for filtering rows.
     conn : duckdb.DuckDBPyConnection, optional
         Connection to use.
-        
+
     Returns
     -------
     duckdb.DuckDBPyRelation
         Relation with selected rows.
     """
     table_name = _register_relation(conn, relation)
-    
+
     if indices is not None and criteria is None:
         # Select by row indices
         if isinstance(indices, str):
@@ -760,31 +793,34 @@ def select_rows(relation: duckdb.DuckDBPyRelation, indices: Optional[Union[List[
             if any((not isinstance(i, int) or i < 0) for i in indices):
                 raise ValueError("indices must be a list of non-negative integers")
             # Use ROW_NUMBER() to filter by 1-based positions.
-            positions = ', '.join(str(i + 1) for i in indices)
+            positions = ", ".join(str(i + 1) for i in indices)
             query = f"""
                 SELECT * EXCLUDE (row_num) FROM (
                     SELECT *, ROW_NUMBER() OVER () AS row_num FROM {table_name}
                 ) WHERE row_num IN ({positions})
             """
             return conn.query(query)
-    
+
     if criteria is not None:
         # Filter by SQL criteria
         _validate_sql_fragment(criteria, context="Row-selection criteria")
         query = f"SELECT * FROM {table_name} WHERE {criteria}"
         return conn.query(query)
-    
+
     # If no criteria, return all rows
     return conn.query(f"SELECT * FROM {table_name}")
 
 
-def transform_column(relation: duckdb.DuckDBPyRelation, column: str,
-                     func: Union[str, Callable],
-                     target_column: Optional[str] = None,
-                     conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def transform_column(
+    relation: duckdb.DuckDBPyRelation,
+    column: str,
+    func: Union[str, Callable],
+    target_column: Optional[str] = None,
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Transform a column using a function or SQL expression.
-    
+
     Parameters
     ----------
     relation : duckdb.DuckDBPyRelation
@@ -797,7 +833,7 @@ def transform_column(relation: duckdb.DuckDBPyRelation, column: str,
         Name of the new column. If None, replaces the original.
     conn : duckdb.DuckDBPyConnection, optional
         Connection to use.
-        
+
     Returns
     -------
     duckdb.DuckDBPyRelation
@@ -805,9 +841,11 @@ def transform_column(relation: duckdb.DuckDBPyRelation, column: str,
     """
     old_columns = relation.columns
     _ensure_columns_exist(old_columns, [column])
-    if target_column is not None and (not isinstance(target_column, str) or not target_column.strip()):
+    if target_column is not None and (
+        not isinstance(target_column, str) or not target_column.strip()
+    ):
         raise ValueError("target_column must be a non-empty string or None")
-    
+
     if isinstance(func, str):
         # SQL expression
         _validate_sql_fragment(func, context="Transform SQL expression")
@@ -818,16 +856,16 @@ def transform_column(relation: duckdb.DuckDBPyRelation, column: str,
         table_name = _register_relation(conn, relation)
         query = f"SELECT * FROM {table_name}"
         df = conn.query(query).fetchdf()
-        
+
         if target_column is None:
             target_column = column
-        
+
         df[target_column] = df[column].apply(func)
-        
+
         return conn.from_df(df)
-    
+
     table_name = _register_relation(conn, relation)
-    
+
     if target_column is None or target_column == column:
         # Replace the column
         select_parts = [_quote_id(c) for c in old_columns if c != column]
@@ -836,18 +874,39 @@ def transform_column(relation: duckdb.DuckDBPyRelation, column: str,
         # Add a new column
         select_parts = [_quote_id(c) for c in old_columns]
         select_parts.append(f"{transform_expr} AS {_quote_id(target_column)}")
-    
+
     query = f"SELECT {', '.join(select_parts)} FROM {table_name}"
-    
+
     return conn.query(query)
 
 
-def transform_columns(relation: duckdb.DuckDBPyRelation, columns: Union[str, List[str]],
-                      func: Union[str, Callable],
-                      target_columns: Optional[Union[str, List[str]]] = None,
-                      conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def transform_columns(
+    relation: duckdb.DuckDBPyRelation,
+    columns: Union[str, list[str]],
+    func: Union[str, Callable],
+    target_columns: Optional[Union[str, list[str]]] = None,
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Transform multiple columns using a function or SQL expression.
+
+    Parameters
+    ----------
+    relation : duckdb.DuckDBPyRelation
+        The input relation.
+    columns : str or list of str
+        Column name(s) to transform.
+    func : str or callable
+        Transformation function or SQL expression.
+    target_columns : str or list of str, optional
+        Name(s) of the new column(s). If None, replaces the originals.
+    conn : duckdb.DuckDBPyConnection, optional
+        Connection to use.
+
+    Returns
+    -------
+    duckdb.DuckDBPyRelation
+        Relation with transformed columns.
     """
     if isinstance(columns, str):
         columns = [columns]
@@ -858,24 +917,31 @@ def transform_columns(relation: duckdb.DuckDBPyRelation, columns: Union[str, Lis
         target_columns = columns
     elif isinstance(target_columns, str):
         target_columns = [target_columns]
-    if hasattr(target_columns, '__len__') and not isinstance(target_columns, str) and len(target_columns) != len(columns):
+    if (
+        hasattr(target_columns, "__len__")
+        and not isinstance(target_columns, str)
+        and len(target_columns) != len(columns)
+    ):
         raise ValueError("target_columns must be the same length as columns")
-    
+
     # For now, use transform_column for each column
     result = relation
     for i, col in enumerate(columns):
         target = target_columns[i] if i < len(target_columns) else col
         result = transform_column(result, col, func, target, conn)
-    
+
     return result
 
 
-def filter_on(relation: duckdb.DuckDBPyRelation, criteria: str,
-              complement: bool = False,
-              conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def filter_on(
+    relation: duckdb.DuckDBPyRelation,
+    criteria: str,
+    complement: bool = False,
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Filter rows based on a SQL-like criteria string.
-    
+
     Parameters
     ----------
     relation : duckdb.DuckDBPyRelation
@@ -887,7 +953,7 @@ def filter_on(relation: duckdb.DuckDBPyRelation, criteria: str,
         If True, return rows that DON'T match the criteria.
     conn : duckdb.DuckDBPyConnection, optional
         Connection to use.
-        
+
     Returns
     -------
     duckdb.DuckDBPyRelation
@@ -895,22 +961,27 @@ def filter_on(relation: duckdb.DuckDBPyRelation, criteria: str,
     """
     table_name = _register_relation(conn, relation)
     _validate_sql_fragment(criteria, context="Filter criteria")
-    
+
     if complement:
         query = f"SELECT * FROM {table_name} WHERE NOT ({criteria})"
     else:
         query = f"SELECT * FROM {table_name} WHERE {criteria}"
-    
+
     return conn.query(query)
 
 
-def filter_string(relation: duckdb.DuckDBPyRelation, column: str, search_string: str,
-                  complement: bool = False, case: bool = True,
-                  regex: bool = True,
-                  conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
+def filter_string(
+    relation: duckdb.DuckDBPyRelation,
+    column: str,
+    search_string: str,
+    complement: bool = False,
+    case: bool = True,
+    regex: bool = True,
+    conn: Optional[duckdb.DuckDBPyConnection] = None,
+) -> duckdb.DuckDBPyRelation:
     """
     Filter rows based on whether a string column contains a substring.
-    
+
     Parameters
     ----------
     relation : duckdb.DuckDBPyRelation
@@ -927,7 +998,7 @@ def filter_string(relation: duckdb.DuckDBPyRelation, column: str, search_string:
         If True, treat search_string as regex pattern.
     conn : duckdb.DuckDBPyConnection, optional
         Connection to use.
-        
+
     Returns
     -------
     duckdb.DuckDBPyRelation
@@ -937,13 +1008,13 @@ def filter_string(relation: duckdb.DuckDBPyRelation, column: str, search_string:
     _ensure_columns_exist(relation.columns, [column])
     col = _quote_id(column)
     pat = _sql_literal(search_string)
-    
+
     if regex:
         try:
             re.compile(search_string)
         except re.error as exc:
             raise ValueError(f"Invalid regex pattern for filter_string: {exc}") from exc
-        op = 'NOT ' if complement else ''
+        op = "NOT " if complement else ""
         query = f"SELECT * FROM {table_name} WHERE {op}regexp_matches({col}, {pat})"
     else:
         if case:
@@ -954,5 +1025,5 @@ def filter_string(relation: duckdb.DuckDBPyRelation, column: str, search_string:
             query = f"SELECT * FROM {table_name} WHERE NOT ({like_expr})"
         else:
             query = f"SELECT * FROM {table_name} WHERE {like_expr}"
-    
+
     return conn.query(query)
