@@ -169,7 +169,7 @@ from_csv(path: Union[str, pathlib.Path], **kwargs: Any) -> 'DuckJanitor'
 
 - **path** — str or Path
   Path to the CSV file.
-  **kwargs
+- **kwargs**
   Additional arguments passed to DuckDB's read_csv.
 
 **Returns**
@@ -225,7 +225,7 @@ from_excel(path: Union[str, pathlib.Path], sheet_name: Union[str, int, NoneType]
   Column → dtype overrides.
 - **engine** — str, optional
   'openpyxl' (xlsx) or 'xlrd' (xls). Auto-detected if omitted.
-  **kwargs
+- **kwargs**
   Extra keyword args forwarded to ``pandas.read_excel``.
 
 **Returns**
@@ -236,9 +236,9 @@ A DuckJanitor instance.
 **Example** *(from docstring)*
 
 ```python
->>> >>> dj = DuckJanitor.from_excel('data.xlsx')
->>> >>> dj = DuckJanitor.from_excel('report.xls', sheet_name='Summary')
->>> >>> dj = DuckJanitor.from_excel('data.xlsx', usecols='A:D', skiprows=2)
+>>> dj = DuckJanitor.from_excel('data.xlsx')
+>>> dj = DuckJanitor.from_excel('report.xls', sheet_name='Summary')
+>>> dj = DuckJanitor.from_excel('data.xlsx', usecols='A:D', skiprows=2)
 ```
 
 
@@ -269,7 +269,7 @@ from_json(path: Union[str, pathlib.Path, List[Union[str, pathlib.Path]]], format
 - **format** — str, optional
   ``'auto'`` (default), ``'array'``, or ``'newline_delimited'``.
   ``'auto'`` lets DuckDB infer from file content/extension.
-  **kwargs
+- **kwargs**
   Extra arguments forwarded to DuckDB's ``read_json_auto``
   (e.g. ``columns``, ``records``, ``maximum_object_size``).
 
@@ -281,12 +281,12 @@ A DuckJanitor instance.
 **Example** *(from docstring)*
 
 ```python
->>> >>> dj = DuckJanitor.from_json('data.json')
->>> >>> dj = DuckJanitor.from_json('logs.jsonl')  # NDJSON
->>> >>> dj = DuckJanitor.from_json('s3://bucket/data.json')
->>> >>> dj = DuckJanitor.from_json('data/*.json')  # glob
->>> >>> dj = DuckJanitor.from_json(['part1.json', 'part2.json'])
->>> >>> dj = DuckJanitor.from_json('data.json', format='array')
+>>> dj = DuckJanitor.from_json('data.json')
+>>> dj = DuckJanitor.from_json('logs.jsonl')  # NDJSON
+>>> dj = DuckJanitor.from_json('s3://bucket/data.json')
+>>> dj = DuckJanitor.from_json('data/*.json')  # glob
+>>> dj = DuckJanitor.from_json(['part1.json', 'part2.json'])
+>>> dj = DuckJanitor.from_json('data.json', format='array')
 ```
 
 
@@ -313,9 +313,9 @@ A DuckJanitor instance.
 **Example** *(from docstring)*
 
 ```python
->>> >>> dj = DuckJanitor.from_parquet('data.parquet')
->>> >>> dj = DuckJanitor.from_parquet(['part1.parquet', 'part2.parquet'])
->>> >>> dj = DuckJanitor.from_parquet('s3://bucket/data.parquet')
+>>> dj = DuckJanitor.from_parquet('data.parquet')
+>>> dj = DuckJanitor.from_parquet(['part1.parquet', 'part2.parquet'])
+>>> dj = DuckJanitor.from_parquet('s3://bucket/data.parquet')
 ```
 
 
@@ -367,7 +367,7 @@ The cleaned data.
 **Example** *(from docstring)*
 
 ```python
->>> >>> result = dj.clean_names().remove_empty().collect()
+>>> result = dj.clean_names().remove_empty().collect()
 ```
 
 
@@ -422,7 +422,7 @@ Self for method chaining.
 **Example** *(from docstring)*
 
 ```python
->>> >>> dj.sql("SELECT * FROM self WHERE age > 18")
+>>> dj.sql("SELECT * FROM self WHERE age > 18")
 ```
 
 
@@ -709,8 +709,8 @@ Self for method chaining.
 **Example** *(from docstring)*
 
 ```python
->>> >>> dj.filter_column('age', lambda x: x > 18)
->>> >>> dj.filter_column('sales', 'sales > 1000')
+>>> dj.filter_column('age', lambda x: x > 18)
+>>> dj.filter_column('sales', 'sales > 1000')
 ```
 
 
@@ -2527,7 +2527,7 @@ compiled regular expression for use in selection DSLs.  We subclass
 via ``re.search(patterns('foo'), text)``.
 
 ```python
-<class 'pyduck_janitor.duck_janitor.patterns'>
+class patterns(str)
 ```
 
 **Example** *(from verified snippet)*

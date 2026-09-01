@@ -349,11 +349,30 @@ def render_body_block(title: str, body: str) -> list[str]:
 
 
 def fmt_signature(obj) -> str:
+    """Render a human-readable signature for a function, method, or class.
+
+    Order of preference:
+
+    1. ``inspect.signature`` for callables (covers functions, methods, and
+       dataclass-style classes whose ``__init__`` is introspectable).
+    2. ``class Name(Bases)`` for classes where signature inference fails
+       (e.g. ``patterns`` which subclasses ``str`` and whose
+       ``__init__`` is ``str.__init__``).
+    3. ``Name(...)`` as a last-resort fallback.
+    """
+    import inspect as _inspect
     try:
-        sig = inspect.signature(obj)
+        sig = _inspect.signature(obj)
         return f'{obj.__name__}{sig}'
-    except (TypeError, ValueError):  # non-function (DropLabel dataclass)
-        return str(obj)
+    except (TypeError, ValueError):
+        pass
+    if _inspect.isclass(obj):
+        try:
+            bases = ', '.join(b.__name__ for b in obj.__bases__)
+        except Exception:
+            bases = 'object'
+        return f'class {obj.__name__}({bases})'
+    return f'{obj.__name__}(...)'
 
 
 def indent_code(code: str, indent: str = '    ') -> str:
@@ -437,8 +456,15 @@ def build_page(check_only: bool = False) -> str | None:
                 if not l.strip():
                     continue
                 m = re.match(r'^(\S+?)\s*:\s*(.*)$', l)
+                # Numpy-style parameter headings render as ``name : type``;
+                # some docstrings put ``**kwargs`` on its own line without a
+                # colon — render it as its own bullet instead of a
+                # continuation of the previous entry.
+                name_only = re.match(r'^(\**\w+\**)$', l.strip())
                 if m and not l.startswith(' '):
                     parts.append(f'- **{m.group(1)}** — {m.group(2).strip()}')
+                elif name_only:
+                    parts.append(f'- **{name_only.group(1).strip("*")}**')
                 else:
                     parts.append('  ' + l.strip())
             parts.append('')
@@ -468,7 +494,12 @@ def build_page(check_only: bool = False) -> str | None:
         if example:
             parts.append(f'**Example** *(from {source})*\n')
             parts.append('```python')
-            parts.extend('>>> ' + l for l in example.splitlines())
+            # Docstring Examples sections sometimes carry their own ``>>> `` /
+            # ``... `` doctest prefixes; strip those before re-prefixing, so
+            # the rendered output never shows ``>>> >>> dj = ...``.
+            _PROMPT_RE = re.compile(r'^(?:>>> |\.{3} )')
+            for l in example.splitlines():
+                parts.append('>>> ' + _PROMPT_RE.sub('', l))
             parts.append('```\n')
         else:
             parts.append('_No example available._\n')
