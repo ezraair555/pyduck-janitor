@@ -627,3 +627,57 @@ class TestToDatetime:
         dj = DuckJanitor.from_pandas(pd.DataFrame({'d': ['2024-01-01']}))
         with pytest.raises(ValueError):
             dj.to_datetime('nope')
+
+
+class TestSelectDslExtensions:
+    """The pyjanitor ``select`` helper is supported under select_columns."""
+
+    @pytest.fixture
+    def ds_df(self):
+        return pd.DataFrame({
+            'value_a': [1, 2],
+            'value_b': [3, 4],
+            'other': ['x', 'y'],
+            'phi': [10, 20],
+        })
+
+    def test_comma_separated_string(self, ds_df):
+        dj = DuckJanitor.from_pandas(ds_df)
+        out = dj.select_columns('value_a, other').collect()
+        assert sorted(out.columns) == ['other', 'value_a']
+
+    def test_glob_pattern(self, ds_df):
+        dj = DuckJanitor.from_pandas(ds_df)
+        out = dj.select_columns('value*').collect()
+        assert sorted(out.columns) == ['value_a', 'value_b']
+
+    def test_regex_pattern(self, ds_df):
+        dj = DuckJanitor.from_pandas(ds_df)
+        out = dj.select_columns('re:^phi$').collect()
+        assert list(out.columns) == ['phi']
+
+    def test_unknown_glob_raises(self, ds_df):
+        dj = DuckJanitor.from_pandas(ds_df)
+        with pytest.raises(ValueError, match='no columns match'):
+            dj.select_columns('nomatch_xyz*')
+
+
+class TestSelectAlias:
+    def test_select_columns_kwargs(self, ds_df=TestSelectDslExtensions):  # noqa
+        # Re-use the DSL extensions fixture from above via a simple inline.
+        df = pd.DataFrame({'a': [1, 2], 'b': [3, 4], 'c': [5, 6]})
+        dj = DuckJanitor.from_pandas(df)
+        out = dj.select(columns='a, c').collect()
+        assert sorted(out.columns) == ['a', 'c']
+
+    def test_select_with_index_kwarg_raises(self):
+        df = pd.DataFrame({'a': [1, 2]})
+        dj = DuckJanitor.from_pandas(df)
+        with pytest.raises(NotImplementedError):
+            dj.select(columns='a', index=None)
+
+    def test_select_without_columns_raises(self):
+        df = pd.DataFrame({'a': [1, 2]})
+        dj = DuckJanitor.from_pandas(df)
+        with pytest.raises(NotImplementedError):
+            dj.select(invert=False)

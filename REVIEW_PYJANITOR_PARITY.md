@@ -3,15 +3,24 @@
 Source of pyjanitor API: <https://pyjanitor-devs.github.io/pyjanitor/api/functions/>
 Source of pyduck-janitor API: scan of public methods on `DuckJanitor` in this repo (post batches 1–3).
 
-## Summary (after Batches 1, 2, 3)
+## Summary (after Batches 1, 2, 3 + `select` finalization)
 
 - pyjanitor declared functions: **90**
-- pyduck-janitor public methods: **99**
-- Shared by name: **89**
-- Missing in pyduck-janitor: **1** (the string-DSL ``select``)
+- pyduck-janitor public methods: **100**
+- Shared by name: **90**
+- Missing in pyduck-janitor: **0**
 - Extra (DuckDB-only / convenience) in pyduck-janitor: **10**
 
-**Coverage (shared / pyjanitor): 98.9%** (was 49.5% at start of session, 66.3% after quick-wins, 97.8% after Batch 3 single-add, 98.9% after `to_datetime`).
+**Coverage (shared / pyjanitor): 100.0%** (was 49.5% at start of session, 66.3% after quick-wins, 97.8% after Batch 3, 98.9% after `to_datetime`, **100.0%** after the pyjanitor `select` DSL was folded into `select_columns`).
+
+The final pyjanitor-only function, ``select``, was implemented by extending
+``select_columns`` with three string-DSL features (per John's note that ``select`` lives under ``select_columns`` in pyjanitor):
+
+* comma-separated strings (``"a, b, c"``)
+* shell-glob patterns (``"value*"``)
+* regex patterns prefixed with ``re:`` (``"re:^phi$"``)
+
+A thin ``select()`` alias on ``DuckJanitor`` preserves the pyjanitor name; the rest of the legacy ``select`` kwargs (``index=``, ``axis=``, ``invert=``, ``rows=``) raise ``NotImplementedError`` because pyduck-janitor's relational model only has columns, not a pandas-style index, and the pyjanitor docs themselves deprecate ``select`` in favour of ``select_columns`` / ``select_rows``.
 
 ## Functions newly added in Batches 1–3
 
@@ -59,11 +68,9 @@ Source of pyduck-janitor API: scan of public methods on `DuckJanitor` in this re
 | `get_join_indices` | new (Python-side pair enumeration) |
 | `to_datetime` | new (DuckDB ``strptime`` cast) |
 
-## ✅ Not yet implemented (1)
+## ✅ All pyjanitor-declared functions now implemented
 
-| Function | Effort | Notes |
-| --- | --- | --- |
-| `select(string)` | large | Requires pyjanitor's string-DSL parser (``"col_a:col_c, col_b"`` style). Stub skip for now. |
+Empty list — see the per-batch tables above for implementation details.
 
 ## ➕ Extra (DuckDB-only / pyduck-janitor extensions)
 
@@ -71,7 +78,7 @@ Source of pyduck-janitor API: scan of public methods on `DuckJanitor` in this re
 
 ## Test status
 
-- 270 passed (193 pre-existing + 77 new alias tests in `tests/test_pyjanitor_aliases.py`).
+- 277 passed (193 pre-existing + 84 new alias / DSL tests in `tests/test_pyjanitor_aliases.py`).
 
 ## Summary by batch
 
@@ -80,4 +87,5 @@ Source of pyduck-janitor API: scan of public methods on `DuckJanitor` in this re
 - After Batch 2: ~88% parity (informal; re-computed at Batch 3 boundary)
 - After Batch 3: 97.8% parity, 268 tests passing
 - After `to_datetime`: 98.9% parity, 270 tests passing
+- After `select` DSL landed in `select_columns`: 100.0% parity, 277 tests passing
 

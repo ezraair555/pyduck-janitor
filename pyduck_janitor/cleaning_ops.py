@@ -624,32 +624,75 @@ def select_columns(relation: duckdb.DuckDBPyRelation, columns: Union[str, List[s
                    conn: Optional[duckdb.DuckDBPyConnection] = None) -> duckdb.DuckDBPyRelation:
     """
     Select specific columns from the relation.
-    
+
     Parameters
     ----------
     relation : duckdb.DuckDBPyRelation
         The input relation.
     columns : str or list of str
-        Column(s) to select.
+        Column(s) to select.  Accepts:
+
+        * A list or tuple of column names: ``["a", "b"]``.
+        * A bare column name: ``"a"``.
+        * A comma-and-space-delimited string: ``"a, b, c"``.
+        * A shell-glob pattern: ``"value*"`` (matches via ``fnmatch``).
+        * A regex pattern prefixed with ``re:``: ``"re:^v_"``.
+
+        This mirrors pyjanitor's ``select`` helper, which itself documents
+        pyjanitor's ``select_columns`` as the canonical entry point.
     conn : duckdb.DuckDBPyConnection, optional
         Connection to use.
-        
+
     Returns
     -------
     duckdb.DuckDBPyRelation
         Relation with selected columns.
     """
+    import re as _re
+    import fnmatch as _fnmatch
+
     table_name = _register_relation(conn, relation)
-    
+
     if isinstance(columns, str):
-        columns = [columns]
+        # Detect DSL types.
+        if columns.startswith('re:'):
+            pattern = _re.compile(columns[3:])
+            columns = [c for c in relation.columns if pattern.search(c)]
+        elif ',' in columns or '*' in columns or '?' in columns:
+            if ',' in columns:
+                tokens = [t.strip() for t in columns.split(',') if t.strip()]
+            else:
+                tokens = [columns]
+            # If any token is a glob, expand it. Otherwise treat as literal.
+            columns = []
+            for tok in tokens:
+                if any(g in tok for g in ('*', '?', '[')):
+                    columns.extend(
+                        c for c in relation.columns if _fnmatch.fnmatchcase(c, tok)
+                    )
+                else:
+                    columns.append(tok)
+            if not columns:
+                raise ValueError(
+                    f'select_columns(): no columns match pattern {columns!r}'
+                )
+        else:
+            columns = [columns]
     if not columns:
         raise ValueError("columns must contain at least one column")
+    # Deduplicate while preserving order.
+    seen = set()
+    deduped = []
+    for c in columns:
+        if c not in seen:
+            seen.add(c)
+            deduped.append(c)
+    columns = deduped
     _ensure_columns_exist(relation.columns, columns)
-    
+
     select_parts = [_quote_id(col) for col in columns]
     query = f"SELECT {', '.join(select_parts)} FROM {table_name}"
-    
+
     return conn.query(query)
 
 

@@ -578,10 +578,37 @@ class DuckJanitor:
         return DuckJanitor(new_relation, self._connection)
     
     def select_columns(self, columns: Union[str, List[str]]) -> 'DuckJanitor':
-        """Select specific columns."""
+        """Select specific columns.
+
+        Accepts a list, a single column name, a comma-separated string,
+        a shell-glob pattern (e.g. ``"v*"``), or a regex prefix (``"re:^v_"``).
+        See :func:`pyduck_janitor.cleaning_ops.select_columns` for details.
+        """
         from .cleaning_ops import select_columns as _select_columns
         new_relation = _select_columns(self._relation, columns, self._connection)
         return DuckJanitor(new_relation, self._connection)
+
+    def select(self, *args, **kwargs) -> 'DuckJanitor':
+        """Convenience alias for the pyjanitor ``select`` DSL.
+
+        The pyjanitor API page has ``select`` at the top of the
+        ``select`` family, but their own docs state::
+
+            This function has been deprecated.  Kindly use
+            ``jn.select_columns`` or ``jn.select_rows``.
+
+        We expose it as a chainable convenience whose only supported
+        form is the ``columns=`` keyword. Positional ``args`` and other
+        kwargs (``index=``, ``axis=``, ``invert=``) are accepted but
+        not implemented; they will raise ``NotImplementedError``.
+        """
+        if args or any(k in kwargs for k in ('index', 'axis', 'invert', 'rows')):
+            raise NotImplementedError(
+                'select(): only the columns= shorthand is supported; '
+                'use .select_columns(...).select_rows(...) for the '
+                'full pyjanitor DSL.'
+            )
+        return self.select_columns(kwargs.get('columns', []))
     
     def select_rows(self, indices: Optional[Union[List[int], str]] = None,
                     criteria: Optional[str] = None) -> 'DuckJanitor':
