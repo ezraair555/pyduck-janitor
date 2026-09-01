@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.0 - 2026-08-31
+
+### Added
+- **100% pyjanitor API parity** — 94/94 of the functions documented on the pyjanitor API reference are now covered, verified by a fresh scan of pyjanitor's live docs. Parity analysis: `REVIEW_PYJANITOR_PARITY.md`.
+- ~35 new chainable methods on `DuckJanitor`:
+  - Date conversions: `convert_unix_date`, `convert_excel_date`, `convert_matlab_date`, `excel_time_to_numeric`, `sas_numeric_to_date`, `to_datetime` (float-safe via `TO_TIMESTAMP`), plus `convert_to_date`/`convert_to_datetime` aliases.
+  - Structural verbs: `move`, `reorder_columns`, `get_columns`, `get_index_labels`, `row_to_names`, `collapse_levels`, `explode_index`, `change_index_dtype`.
+  - Reshape/aggregation: `expand`, `expand_grid`, `summarise`, `pivot_longer_spec` (UNPIVOT), `pivot_wider_spec` (PIVOT), `join_agg`, `get_join_indices`.
+  - Data quality / encoding: `rle_id`, `factorize_columns`, `update_where`, `unionize_dataframe_categories`, `scale_mad`, `round_to_fraction`.
+  - Row/column utilities: `shuffle`, `toset`, `take_first`, `sort_naturally`, `sort_column_value_order`, `filter_date`, `cartesian_product`, `then`.
+  - pyjanitor naming aliases: `rename_columns`, `truncate_datetime_dataframe`, `fill_direction`, `filter_column_isin`, `add_columns`, `assign`, `ungroup`.
+- **Select DSL** in `select_columns`: comma-strings (`"a, b, c"`), shell-globs (`"value*"`), regex (`"re:^v_"`); plus a thin `select()` alias matching pyjanitor's placement of `select` under the select family.
+- **pyjanitor helper surface**: `DropLabel` (functional select-DSL exclusion sentinel), `patterns` (regex helper), `describe_class()` (DESCRIBE-backed column types).
+- 91 new tests in `tests/test_pyjanitor_aliases.py` — full suite grows from 193 to 284 passing.
+
+### Fixed
+- README now references only example files that exist (`anova_example.py`, `two_sample_test.py`, `confidence_intervals.py`, `proportion_test.py` were phantom references from an earlier draft and are removed).
+- Supported-functions section updated from "51 functions" to the full 109-method surface.
+
 ## 0.1.3 - 2026-08-28
 
 ### Added

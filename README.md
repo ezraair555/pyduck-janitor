@@ -77,35 +77,52 @@ result = (
 print(result)
 ```
 
+### Select DSL (pyjanitor-compatible)
+
+```python
+from pyduck_janitor import DuckJanitor, DropLabel
+
+dj = DuckJanitor.from_pandas(pd.DataFrame({
+    'sales_month': ['Jan', 'Feb'],
+    'company2': [180.0, 250.0],
+    'company3': [400.0, 500.0],
+    'notes': ['x', 'y'],
+}))
+
+dj.select_columns('sales_month, company2')              # comma-string
+dj.select_columns('company*')                           # glob expansion
+dj.select_columns('re:^company')                        # regex
+dj.select_columns(['company*', DropLabel('company3')])  # exclude one column
+```
+
 ## Supported Functions
 
-pyduck-janitor implements **51 functions** across three modules:
+pyduck-janitor implements the **complete pyjanitor documented API** (94/94 functions — verified against the pyjanitor API reference) plus 18 DuckDB-specific extensions, exposed as **109 chainable methods** on `DuckJanitor`.
 
-### Core Module (`cleaning_ops.py`) - 16 functions
+### Core cleaning verbs (`cleaning_ops.py`)
 - `clean_names()` - Clean column names
 - `remove_columns()` - Remove columns
-- `add_column()` - Add a new column
-- `rename_column()` - Rename a column
+- `add_column()` / `add_columns()` - Add a new column (single or dict form)
+- `rename_column()` / `rename_columns()` - Rename a column
 - `dropna()` - Drop rows with NA values
 - `remove_empty()` - Remove empty rows/columns
-- `filter_column()` - Filter by column condition
+- `filter_column()` / `filter_column_isin()` - Filter by column condition / IS IN list
 - `filter_on()` - Filter with SQL-like criteria
 - `filter_string()` - Filter by substring
 - `coalesce()` - Merge columns
 - `encode_categorical()` - Encode as categorical
 - `get_dummies()` - One-hot encode
-- `select_columns()` - Select columns
+- `select_columns()` / `select()` - Select columns (supports comma-strings, globs, `re:` regex, and `DropLabel`)
 - `select_rows()` - Select rows
-- `transform_column()` - Transform single column
-- `transform_columns()` - Transform multiple columns
+- `transform_column()` / `transform_columns()` - Transform one or many columns
 
-### Extended Module (`cleaning_ops_extended.py`) - 18 functions
+### Extended verbs (`cleaning_ops_extended.py`)
 - `bin_numeric()` - Bin numeric column
 - `change_type()` - Change column type
 - `concatenate_columns()` - Join columns
 - `deconcatenate_column()` - Split column
 - `drop_constant_columns()` - Remove constant columns
-- `fill()` - Fill missing values
+- `fill()` / `fill_direction()` - Fill missing values (forward/backward)
 - `fill_empty()` - Fill empty strings
 - `flag_nulls()` - Flag null values
 - `limit_column_characters()` - Truncate column names
@@ -114,12 +131,12 @@ pyduck-janitor implements **51 functions** across three modules:
 - `groupby_topk()` - Top k per group
 - `case_when()` - Conditional logic
 - `currency_column_to_numeric()` - Parse currency
-- `convert_date()` - Convert to date
-- `truncate_datetime()` - Truncate datetime
-- `pivot_wider()` - Pivot to wide format
-- `pivot_longer()` - Pivot to long format
+- `convert_date()` / `convert_to_date()` / `convert_to_datetime()` - Convert to date/datetime
+- `convert_unix_date()`, `convert_excel_date()`, `convert_matlab_date()` - Numeric date conversions
+- `truncate_datetime()` / `truncate_datetime_dataframe()` - Truncate datetime
+- `pivot_wider()` / `pivot_longer()` - Reshape wide/long
 
-### Final/Hybrid Module (`cleaning_ops_final.py`) - 17 functions
+### Hybrid verbs (`cleaning_ops_final.py`)
 - `conditional_join()` - Join with condition
 - `get_dupes()` - Find duplicate rows
 - `dropnotnull()` - Drop non-null values
@@ -132,11 +149,59 @@ pyduck-janitor implements **51 functions** across three modules:
 - `complete()` - Complete missing combinations
 - `also()` - Apply multiple operations
 - `alias()` - Create column aliases
-- `mutate()` - Add/modify columns
+- `mutate()` / `assign()` / `ungroup()` - Add/modify columns, tidyverse-style verbs
 - `drop_duplicate_columns()` - Remove duplicate columns
-- `compare_df_cols()` - Compare column contents
+- `compare_df_cols()` / `compare_df_cols_same()` - Compare column contents/shape
 - `join_apply()` - Apply function to joined data
 - `process_text()` - Text processing
+
+### pyjanitor parity methods (v0.2.0)
+
+These were added to reach 100% coverage of pyjanitor's documented API:
+
+| pyjanitor name | pyduck-janitor method | Notes |
+| --- | --- | --- |
+| `rename_columns` | alias of `rename_column` | plural form |
+| `truncate_datetime_dataframe` | alias of `truncate_datetime` | |
+| `convert_to_date` / `convert_to_datetime` | aliases of `convert_date` | |
+| `convert_unix_date` | new | `TO_TIMESTAMP`, seconds/millis/micros |
+| `convert_excel_date` | new | Excel serial dates |
+| `convert_matlab_date` | new | MATLAB datenums |
+| `excel_time_to_numeric` | new | Excel time fraction → seconds |
+| `sas_numeric_to_date` | new | SAS origin 1960-01-01 |
+| `to_datetime` | new | DuckDB `strptime` cast |
+| `fill_direction` | alias of `fill` | |
+| `filter_column_isin` | new | quoted-column `IS IN` filter |
+| `filter_date` | new | start/end date range filter |
+| `add_columns` | new | dict of `{name: values}` |
+| `assign` / `ungroup` | aliases of `mutate` / no-op | tidyverse naming |
+| `get_columns` / `get_index_labels` | helpers | column introspection |
+| `move` / `reorder_columns` | new | column placement verbs |
+| `row_to_names` | new | promote a row to headers |
+| `rle_id` | new | run-length ids via hash + window |
+| `factorize_columns` | new | `DENSE_RANK` integer encoding |
+| `sort_naturally` | new | human (non-lexicographic) sort |
+| `sort_column_value_order` | new | explicit value ordering |
+| `update_where` | new | conditional column update |
+| `unionize_dataframe_categories` | new | cross-relation VARCHAR alignment |
+| `shuffle` | new | `ORDER BY random()` |
+| `toset` | new | distinct values as a list |
+| `take_first` | new | first N rows |
+| `round_to_fraction` | new | snap to 1/denominator |
+| `scale_mad` | new | median-abs-deviation scaling |
+| `cartesian_product` | new | cross join helper |
+| `then` | new | chain callables |
+| `expand` / `expand_grid` | new | distinct expansion / cross join grid |
+| `change_index_dtype` | new | typed projection of a column |
+| `collapse_levels` | new | concat-join helper |
+| `explode_index` | new | regex-extract a parsed column |
+| `summarise` | new | group-by aggregation helper |
+| `pivot_longer_spec` / `pivot_wider_spec` | new | UNPIVOT / PIVOT spec forms |
+| `join_agg` / `get_join_indices` | new | aggregated/non-equi join helpers |
+| `select` DSL | built into `select_columns` | comma-strings, globs, `re:` regex, `DropLabel` |
+| `DropLabel` | exported class | select-DSL exclusion sentinel |
+| `patterns` | exported function | regex helper with `.compiled` |
+| `describe_class` | method | column-type table (DESCRIBE-backed) |
 
 ## Supported Data Sources
 
@@ -236,14 +301,10 @@ result = df.collect()  # Explicit execution
 
 See the `examples/` directory for complete workflows:
 
-- `examples/anova_example.py` - Analysis of variance
-- `examples/two_sample_test.py` - Two-sample hypothesis tests
-- `examples/confidence_intervals.py` - Bootstrap confidence intervals
-- `examples/proportion_test.py` - Proportion hypothesis tests
 - `examples/basic_cleaning.py` - Basic data cleaning pipeline
 - `examples/large_dataset.py` - Out-of-core processing with Parquet
 - `examples/sql_interop.py` - Mixing janitor methods with SQL
-- `examples/comparison.py` - Performance comparison with pandas
+- `examples/comparison.py` - Performance comparison with pandas + pyjanitor
 
 ## Architecture
 
@@ -280,6 +341,43 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 
 ## Changelog
+
+### 0.2.0 — 100% pyjanitor API parity
+
+- **Full pyjanitor surface**: pyduck-janitor now covers **94/94 (100%)** of the
+  functions documented on the pyjanitor API reference, verified by a fresh
+  scan of pyjanitor's live docs.
+- **~35 new chainable methods** on `DuckJanitor`, including:
+  - Date conversions: `convert_unix_date`, `convert_excel_date`,
+    `convert_matlab_date`, `excel_time_to_numeric`, `sas_numeric_to_date`,
+    `to_datetime` (all with float-safe numeric parsing via `TO_TIMESTAMP`),
+    plus `convert_to_date` / `convert_to_datetime` aliases.
+  - Structural verbs: `move`, `reorder_columns`, `get_columns`,
+    `get_index_labels`, `row_to_names`, `collapse_levels`, `explode_index`,
+    `change_index_dtype`.
+  - Reshape/aggregation: `expand`, `expand_grid`, `summarise`,
+    `pivot_longer_spec` (UNPIVOT), `pivot_wider_spec` (PIVOT with a literal
+    value list), `join_agg`, `get_join_indices`.
+  - Data quality / encoding: `rle_id`, `factorize_columns`, `update_where`,
+    `unionize_dataframe_categories`, `scale_mad`, `round_to_fraction`.
+  - Row/column utilities: `shuffle`, `toset`, `take_first`,
+    `sort_naturally`, `sort_column_value_order`, `filter_date`,
+    `cartesian_product`, `then`.
+  - pyjanitor naming aliases: `rename_columns`, `truncate_datetime_dataframe`,
+    `fill_direction`, `filter_column_isin`, `add_columns`, `assign`, `ungroup`.
+- **Select DSL**: `select_columns` now accepts comma-separated strings
+  (`"a, b, c"`), shell-globs (`"value*"`), and regex (`"re:^v_"`), matching
+  pyjanitor's `select` helper where it lives (under `select_columns`).
+  A thin `select()` alias is exposed; non-column kwargs raise
+  `NotImplementedError` (pyjanitor itself deprecates them).
+- **pyjanitor helper surface**: `DropLabel` (select-DSL exclusion sentinel,
+  functional in mixed lists), `patterns` (regex helper), and
+  `describe_class()` (DESCRIBE-backed column-type table).
+- **Test suite**: grew from 193 to **284 passing tests**
+  (+91 alias/DSL/parity tests in `tests/test_pyjanitor_aliases.py`).
+- **Docs**: fixed stale example references and expanded the supported
+  functions section; parity analysis in
+  [`REVIEW_PYJANITOR_PARITY.md`](REVIEW_PYJANITOR_PARITY.md).
 
 ### 0.1.3 — Validation hardening, audit documentation, and test expansion
 
