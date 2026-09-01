@@ -157,51 +157,63 @@ pyduck-janitor implements the **complete pyjanitor documented API** (94/94 funct
 
 ### pyjanitor parity methods (v0.2.0)
 
-These were added to reach 100% coverage of pyjanitor's documented API:
+These were added in v0.2.0 to reach 100% coverage of pyjanitor's documented API. Every function in this table has a pyjanitor counterpart — the second column shows how the pyduck-janitor method relates to it (same-name implementation or alias of another pyduck verb). Functions with **no** pyjanitor counterpart are listed separately under [DuckDB-only extensions](#duckdb-only-extensions) — none of them appear in this table.
 
-| pyjanitor name | pyduck-janitor method | Notes |
+| pyjanitor function | pyduck-janitor | Notes |
 | --- | --- | --- |
 | `rename_columns` | alias of `rename_column` | plural form |
-| `truncate_datetime_dataframe` | alias of `truncate_datetime` | |
+| `truncate_datetime_dataframe` | alias of `truncate_datetime` |
 | `convert_to_date` / `convert_to_datetime` | aliases of `convert_date` | |
-| `convert_unix_date` | new | `TO_TIMESTAMP`, seconds/millis/micros |
-| `convert_excel_date` | new | Excel serial dates |
-| `convert_matlab_date` | new | MATLAB datenums |
-| `excel_time_to_numeric` | new | Excel time fraction → seconds |
-| `sas_numeric_to_date` | new | SAS origin 1960-01-01 |
-| `to_datetime` | new | DuckDB `strptime` cast |
+| `convert_unix_date` | same-name port of pyjanitor `convert_unix_date` | `TO_TIMESTAMP`, seconds/millis/micros |
+| `convert_excel_date` | same-name port of pyjanitor `convert_excel_date` | Excel serial dates |
+| `convert_matlab_date` | same-name port of pyjanitor `convert_matlab_date` | MATLAB datenums |
+| `excel_time_to_numeric` | same-name port of pyjanitor `excel_time_to_numeric` | Excel time fraction → seconds |
+| `sas_numeric_to_date` | same-name port of pyjanitor `sas_numeric_to_date` | SAS origin 1960-01-01 |
+| `to_datetime` | same-name port of pyjanitor `to_datetime` | DuckDB `strptime` cast |
 | `fill_direction` | alias of `fill` | |
-| `filter_column_isin` | new | quoted-column `IS IN` filter |
-| `filter_date` | new | start/end date range filter |
-| `add_columns` | new | dict of `{name: values}` |
+| `filter_column_isin` | same-name port of pyjanitor `filter_column_isin` | quoted-column `IS IN` filter |
+| `filter_date` | same-name port of pyjanitor `filter_date` | start/end date range filter |
+| `add_columns` | same-name port of pyjanitor `add_columns` | dict of `{name: values}` |
 | `assign` / `ungroup` | aliases of `mutate` / no-op | tidyverse naming |
-| `get_columns` / `get_index_labels` | helpers | column introspection |
-| `move` / `reorder_columns` | new | column placement verbs |
-| `row_to_names` | new | promote a row to headers |
-| `rle_id` | new | run-length ids via hash + window |
-| `factorize_columns` | new | `DENSE_RANK` integer encoding |
-| `sort_naturally` | new | human (non-lexicographic) sort |
-| `sort_column_value_order` | new | explicit value ordering |
-| `update_where` | new | conditional column update |
-| `unionize_dataframe_categories` | new | cross-relation VARCHAR alignment |
-| `shuffle` | new | `ORDER BY random()` |
-| `toset` | new | distinct values as a list |
-| `take_first` | new | first N rows |
-| `round_to_fraction` | new | snap to 1/denominator |
-| `scale_mad` | new | median-abs-deviation scaling |
-| `cartesian_product` | new | cross join helper |
-| `then` | new | chain callables |
-| `expand` / `expand_grid` | new | distinct expansion / cross join grid |
-| `change_index_dtype` | new | typed projection of a column |
-| `collapse_levels` | new | concat-join helper |
-| `explode_index` | new | regex-extract a parsed column |
-| `summarise` | new | group-by aggregation helper |
-| `pivot_longer_spec` / `pivot_wider_spec` | new | UNPIVOT / PIVOT spec forms |
-| `join_agg` / `get_join_indices` | new | aggregated/non-equi join helpers |
-| `select` DSL | built into `select_columns` | comma-strings, globs, `re:` regex, `DropLabel` |
-| `DropLabel` | exported class | select-DSL exclusion sentinel |
-| `patterns` | exported function | regex helper with `.compiled` |
-| `describe_class` | method | column-type table (DESCRIBE-backed) |
+| `get_columns` / `get_index_labels` | same-name ports of the pyjanitor select helpers | column introspection |
+| `move` / `reorder_columns` | same-name ports of pyjanitor `move` / `reorder_columns` | column placement verbs |
+| `row_to_names` | same-name port of pyjanitor `row_to_names` | promote a row to headers |
+| `rle_id` | same-name port of pyjanitor `rle_id` | run-length ids via hash + window |
+| `factorize_columns` | same-name port of pyjanitor `factorize_columns` | `DENSE_RANK` integer encoding |
+| `sort_naturally` | same-name port of pyjanitor `sort_naturally` | human (non-lexicographic) sort |
+| `sort_column_value_order` | same-name port of pyjanitor `sort_column_value_order` | explicit value ordering |
+| `update_where` | same-name port of pyjanitor `update_where` | conditional column update |
+| `unionize_dataframe_categories` | same-name port of pyjanitor `unionize_dataframe_categories` | cross-relation VARCHAR alignment |
+| `shuffle` | same-name port of pyjanitor `shuffle` | `ORDER BY random()` |
+| `toset` | same-name port of pyjanitor `toset` | distinct values as a list |
+| `take_first` | same-name port of pyjanitor `take_first` | first N rows |
+| `round_to_fraction` | same-name port of pyjanitor `round_to_fraction` | snap to 1/denominator |
+| `scale_mad` | same-name port of pyjanitor `scale_mad` | median-abs-deviation scaling |
+| `cartesian_product` | same-name port of pyjanitor `cartesian_product` | cross join helper |
+| `then` | same-name port of pyjanitor `then` | chain callables |
+| `expand` / `expand_grid` | same-name ports of the pyjanitor expand family | distinct expansion / cross join grid |
+| `change_index_dtype` | same-name port of pyjanitor `change_index_dtype` | typed projection of a column |
+| `collapse_levels` | same-name port of pyjanitor `collapse_levels` | concat-join helper |
+| `explode_index` | same-name port of pyjanitor `explode_index` | regex-extract a parsed column |
+| `summarise` | same-name port of pyjanitor `summarise` | group-by aggregation helper |
+| `pivot_longer_spec` / `pivot_wider_spec` | same-name ports of the pyjanitor `_spec` pivots | UNPIVOT / PIVOT spec forms |
+| `join_agg` / `get_join_indices` | same-name ports of the pyjanitor conditional-join helpers | aggregated/non-equi join |
+| `select` | pyjanitor `select` folded into `select_columns` + `select()` alias | comma-strings, globs, `re:` regex, `DropLabel` |
+| `DropLabel` | same-name port of pyjanitor `DropLabel` | select-DSL exclusion sentinel |
+| `patterns` | same-name port of pyjanitor `patterns` | regex helper with `.compiled` |
+| `describe_class` | same-name port of pyjanitor `describe_class` | column-type table (DESCRIBE-backed) |
+
+### DuckDB-only extensions (new — no pyjanitor equivalent)
+
+These are the only truly *new* methods (no pyjanitor counterpart) — they exist because the backend is a live DuckDB connection rather than a pandas DataFrame:
+
+- `from_pandas()`, `from_csv()`, `from_excel()`, `from_json()`, `from_parquet()`, `from_sql()` - Data source loaders
+- `sql()` - Escape hatch: raw SQL against the current relation (use `self` as the table name)
+- `explain()` - EXPLAIN plan for the current pipeline
+- `collect()` / `head()` - Materialize to pandas / preview rows
+- `get_shared_connection()` - access to the underlying DuckDB connection
+
+Plus the pandas-flavored bases that pyjanitor implements differently and pyduck implements natively (comparable intent, DuckDB-native implementation — documented in the module tables above): `dropna`, `fill`, `filter_column`, `convert_date`, `truncate_datetime`, `get_dummies`.
 
 ## Supported Data Sources
 
@@ -347,7 +359,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 - **Full pyjanitor surface**: pyduck-janitor now covers **94/94 (100%)** of the
   functions documented on the pyjanitor API reference, verified by a fresh
   scan of pyjanitor's live docs.
-- **~35 new chainable methods** on `DuckJanitor`, including:
+- **~35 newly added chainable methods** on `DuckJanitor` — all ports of pyjanitor functions (same names except where noted as aliases), not pyduck-only inventions; the pyduck-only extensions are listed separately:
   - Date conversions: `convert_unix_date`, `convert_excel_date`,
     `convert_matlab_date`, `excel_time_to_numeric`, `sas_numeric_to_date`,
     `to_datetime` (all with float-safe numeric parsing via `TO_TIMESTAMP`),

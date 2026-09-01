@@ -6,7 +6,7 @@ All notable changes to this project are documented in this file.
 
 ### Added
 - **100% pyjanitor API parity** — 94/94 of the functions documented on the pyjanitor API reference are now covered, verified by a fresh scan of pyjanitor's live docs. Parity analysis: `REVIEW_PYJANITOR_PARITY.md`.
-- ~35 new chainable methods on `DuckJanitor`:
+- ~35 newly added chainable methods on `DuckJanitor` (all ports of pyjanitor functions — same names except where noted as aliases):
   - Date conversions: `convert_unix_date`, `convert_excel_date`, `convert_matlab_date`, `excel_time_to_numeric`, `sas_numeric_to_date`, `to_datetime` (float-safe via `TO_TIMESTAMP`), plus `convert_to_date`/`convert_to_datetime` aliases.
   - Structural verbs: `move`, `reorder_columns`, `get_columns`, `get_index_labels`, `row_to_names`, `collapse_levels`, `explode_index`, `change_index_dtype`.
   - Reshape/aggregation: `expand`, `expand_grid`, `summarise`, `pivot_longer_spec` (UNPIVOT), `pivot_wider_spec` (PIVOT), `join_agg`, `get_join_indices`.
