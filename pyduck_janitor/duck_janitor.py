@@ -1188,27 +1188,87 @@ class DuckJanitor:
     
     def conditional_join(self, other: 'DuckJanitor', on: List[tuple],
                          how: str = 'inner') -> 'DuckJanitor':
-        """Perform conditional (non-equi) joins."""
+        """Perform conditional (non-equi) joins.
+
+        Parameters
+        ----------
+        other : DuckJanitor
+            The right-side relation to join.
+        on : list of tuple
+            Each tuple is ``(left_col, right_col, op_str)`` where
+            ``op_str`` is one of ``'='``, ``'!='``, ``'<'``, ``'<='``,
+            ``'>'``, ``'>='``.
+        how : str, default 'inner'
+            Join type: ``'inner'``, ``'left'``, or ``'right'``.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the conditional-join result.
+        """
         from .cleaning_ops_final import conditional_join as _conditional_join
         new_relation = _conditional_join(self._relation, other._relation, on, how, self._connection)
         return DuckJanitor(new_relation, self._connection)
     
     def get_dupes(self, columns: Optional[Union[str, List[str]]] = None) -> 'DuckJanitor':
-        """Return duplicate rows."""
+        """Return duplicate rows.
+
+        Parameters
+        ----------
+        columns : str or list of str, optional
+            Subset of columns to consider when detecting duplicates.
+            ``None`` uses all columns.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, restricted to rows that have at
+            least one duplicate on ``columns``.
+        """
         from .cleaning_ops_final import get_dupes as _get_dupes
         new_relation = _get_dupes(self._relation, columns, self._connection)
         return DuckJanitor(new_relation, self._connection)
 
     def dropnotnull(self, subset: Optional[Union[str, List[str]]] = None,
                     how: str = 'any') -> 'DuckJanitor':
-        """Remove rows where values are NOT null (keep nulls)."""
+        """Remove rows where values are NOT null (keep nulls).
+
+        Parameters
+        ----------
+        subset : str or list of str, optional
+            Subset of columns to test for non-null. ``None`` uses all
+            columns.
+        how : str, default 'any'
+            ``'any'`` drops rows with any non-null value in ``subset``;
+            ``'all'`` drops only when *all* subset values are non-null.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the matched rows removed.
+        """
         from .cleaning_ops_final import dropnotnull as _dropnotnull
         new_relation = _dropnotnull(self._relation, subset, how, self._connection)
         return DuckJanitor(new_relation, self._connection)
     
     def expand_column(self, column: str, sep: str = '|',
                       prefix: Optional[str] = None) -> 'DuckJanitor':
-        """Expand a delimited column into dummy variables."""
+        """Expand a delimited column into dummy variables.
+
+        Parameters
+        ----------
+        column : str
+            Name of the column holding delimited tokens.
+        sep : str, default '|'
+            Token separator.
+        prefix : str, optional
+            Prefix for the new dummy columns; defaults to ``column + '_'``.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with one dummy column per token.
+        """
         from .cleaning_ops_final import expand_column as _expand_column
         new_relation = _expand_column(self._relation, column, sep, prefix, self._connection)
         return DuckJanitor(new_relation, self._connection)
@@ -1216,42 +1276,134 @@ class DuckJanitor:
     def impute(self, column: str, value: Optional[Any] = None,
                statistic: str = 'mean',
                group_by: Optional[Union[str, List[str]]] = None) -> 'DuckJanitor':
-        """Impute missing values."""
+        """Impute missing values.
+
+        Parameters
+        ----------
+        column : str
+            Name of the column to fill.
+        value : Any, optional
+            Literal value to fill with; if omitted, ``statistic`` is
+            computed from the non-null cells.
+        statistic : str, default 'mean'
+            Aggregation when ``value`` is None: ``'mean'``, ``'median'``,
+            ``'mode'``, ``'min'``, ``'max'``.
+        group_by : str or list of str, optional
+            Compute the statistic per group rather than globally.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with missing values filled.
+        """
         from .cleaning_ops_final import impute as _impute
         new_relation = _impute(self._relation, column, value, statistic, group_by, self._connection)
         return DuckJanitor(new_relation, self._connection)
     
     def jitter(self, column: str, target_column: str,
                scale: float = 0.01, seed: Optional[int] = None) -> 'DuckJanitor':
-        """Add random noise (jitter) to a numeric column."""
+        """Add random noise (jitter) to a numeric column.
+
+        Parameters
+        ----------
+        column : str
+            Name of the source numeric column.
+        target_column : str
+            Name of the output column.
+        scale : float, default 0.01
+            Multiplier applied to ``random()`` (a uniform ``[0,1)``).
+        seed : int, optional
+            PRNG seed for reproducibility (same normalization as :meth:`shuffle`).
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with ``target_column`` added.
+        """
         from .cleaning_ops_final import jitter as _jitter
         new_relation = _jitter(self._relation, column, target_column, scale, seed, self._connection)
         return DuckJanitor(new_relation, self._connection)
     
     def label_encode(self, columns: Union[str, List[str]],
                      suffix: str = '_encoded') -> 'DuckJanitor':
-        """Encode categorical columns with numerical labels."""
+        """Encode categorical columns with numerical labels.
+
+        Parameters
+        ----------
+        columns : str or list of str
+            Columns to label-encode. New columns are appended with
+            ``suffix``; the originals are dropped.
+        suffix : str, default '_encoded'
+            Suffix for the output columns.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the encoded columns.
+        """
         from .cleaning_ops_final import label_encode as _label_encode
         new_relation = _label_encode(self._relation, columns, suffix, self._connection)
         return DuckJanitor(new_relation, self._connection)
     
     def find_replace(self, column: str, value_pairs: Dict[str, str],
                      target_column: Optional[str] = None) -> 'DuckJanitor':
-        """Find and replace values in a column."""
+        """Find and replace values in a column.
+
+        Parameters
+        ----------
+        column : str
+            Name of the source column.
+        value_pairs : dict
+            ``{find: replace}`` mapping applied via SQL ``CASE WHEN``.
+        target_column : str, optional
+            Name of the output column; defaults to overwriting ``column``.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the replaced column.
+        """
         from .cleaning_ops_final import find_replace as _find_replace
         new_relation = _find_replace(self._relation, column, value_pairs, target_column, self._connection)
         return DuckJanitor(new_relation, self._connection)
     
     def count_cumulative_unique(self, column: str,
                                  dest_column: str = 'cumulative_unique') -> 'DuckJanitor':
-        """Return a column with cumulative count of unique values."""
+        """Return a column with cumulative count of unique values.
+
+        Parameters
+        ----------
+        column : str
+            Source column to count uniques from.
+        dest_column : str, default 'cumulative_unique'
+            Name of the appended counter column.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with ``dest_column`` appended.
+        """
         from .cleaning_ops_final import count_cumulative_unique as _count_cumulative_unique
         new_relation = _count_cumulative_unique(self._relation, column, dest_column, self._connection)
         return DuckJanitor(new_relation, self._connection)
     
     def complete(self, columns: Union[str, List[str]],
                  fill_value: Any = None) -> 'DuckJanitor':
-        """Expand relation to include all possible combinations of specified columns."""
+        """Expand relation to include all possible combinations of specified columns.
+
+        Parameters
+        ----------
+        columns : str or list of str
+            Columns to expand; their Cartesian product is added, missing
+            combinations appear as ``NULL`` (or ``fill_value`` if given).
+        fill_value : Any, optional
+            Replacement for cells in newly-added rows.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the completed grid.
+        """
         from .cleaning_ops_final import complete as _complete
         new_relation = _complete(self._relation, columns, fill_value, self._connection)
         return DuckJanitor(new_relation, self._connection)
@@ -1305,14 +1457,44 @@ class DuckJanitor:
     
     def pivot_wider(self, id_cols: Union[str, List[str]],
                     name_col: str, value_col: str) -> 'DuckJanitor':
-        """Pivot data from long to wide format."""
+        """Pivot data from long to wide format.
+
+        Parameters
+        ----------
+        id_cols : str or list of str
+            Identifier columns that remain as rows in the output.
+        name_col : str
+            Column whose values become the new column names.
+        value_col : str
+            Column whose values populate the new columns.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, in wide format.
+        """
         from .cleaning_ops_extended import pivot_wider as _pivot_wider
         new_relation = _pivot_wider(self._relation, id_cols, name_col, value_col, self._connection)
         return DuckJanitor(new_relation, self._connection)
     
     def pivot_longer(self, cols: Union[str, List[str]],
                      names_to: str = 'variable', values_to: str = 'value') -> 'DuckJanitor':
-        """Pivot data from wide to long format."""
+        """Pivot data from wide to long format.
+
+        Parameters
+        ----------
+        cols : str or list of str
+            Columns to unpivot into rows.
+        names_to : str, default 'variable'
+            Output column holding the unpivoted column names.
+        values_to : str, default 'value'
+            Output column holding the unpivoted cell values.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, in long format.
+        """
         from .cleaning_ops_extended import pivot_longer as _pivot_longer
         new_relation = _pivot_longer(self._relation, cols, names_to, values_to, self._connection)
         return DuckJanitor(new_relation, self._connection)

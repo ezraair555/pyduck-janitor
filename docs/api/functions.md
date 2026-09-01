@@ -2008,6 +2008,20 @@ Pivot data from long to wide format.
 pivot_wider(self, id_cols: Union[str, List[str]], name_col: str, value_col: str) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **id_cols** — str or list of str
+  Identifier columns that remain as rows in the output.
+- **name_col** — str
+  Column whose values become the new column names.
+- **value_col** — str
+  Column whose values populate the new columns.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, in wide format.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -2025,6 +2039,20 @@ Pivot data from wide to long format.
 ```python
 pivot_longer(self, cols: Union[str, List[str]], names_to: str = 'variable', values_to: str = 'value') -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **cols** — str or list of str
+  Columns to unpivot into rows.
+- **names_to** — str, default 'variable'
+  Output column holding the unpivoted column names.
+- **values_to** — str, default 'value'
+  Output column holding the unpivoted cell values.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, in long format.
 
 **Example** *(from verified snippet)*
 
@@ -2046,6 +2074,22 @@ Perform conditional (non-equi) joins.
 conditional_join(self, other: 'DuckJanitor', on: List[tuple], how: str = 'inner') -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **other** — DuckJanitor
+  The right-side relation to join.
+- **on** — list of tuple
+  Each tuple is ``(left_col, right_col, op_str)`` where
+  ``op_str`` is one of ``'='``, ``'!='``, ``'<'``, ``'<='``,
+  ``'>'``, ``'>='``.
+- **how** — str, default 'inner'
+  Join type: ``'inner'``, ``'left'``, or ``'right'``.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the conditional-join result.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -2065,6 +2109,18 @@ Return duplicate rows.
 get_dupes(self, columns: Union[str, List[str], NoneType] = None) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **columns** — str or list of str, optional
+  Subset of columns to consider when detecting duplicates.
+  ``None`` uses all columns.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, restricted to rows that have at
+least one duplicate on ``columns``.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -2082,6 +2138,20 @@ Remove rows where values are NOT null (keep nulls).
 ```python
 dropnotnull(self, subset: Union[str, List[str], NoneType] = None, how: str = 'any') -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **subset** — str or list of str, optional
+  Subset of columns to test for non-null. ``None`` uses all
+  columns.
+- **how** — str, default 'any'
+  ``'any'`` drops rows with any non-null value in ``subset``;
+  ``'all'`` drops only when *all* subset values are non-null.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the matched rows removed.
 
 **Example** *(from verified snippet)*
 
@@ -2101,6 +2171,20 @@ Expand a delimited column into dummy variables.
 expand_column(self, column: str, sep: str = '|', prefix: Optional[str] = None) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column** — str
+  Name of the column holding delimited tokens.
+- **sep** — str, default '|'
+  Token separator.
+- **prefix** — str, optional
+  Prefix for the new dummy columns; defaults to ``column + '_'``.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with one dummy column per token.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -2118,6 +2202,24 @@ Impute missing values.
 ```python
 impute(self, column: str, value: Optional[Any] = None, statistic: str = 'mean', group_by: Union[str, List[str], NoneType] = None) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **column** — str
+  Name of the column to fill.
+- **value** — Any, optional
+  Literal value to fill with; if omitted, ``statistic`` is
+  computed from the non-null cells.
+- **statistic** — str, default 'mean'
+  Aggregation when ``value`` is None: ``'mean'``, ``'median'``,
+  ``'mode'``, ``'min'``, ``'max'``.
+- **group_by** — str or list of str, optional
+  Compute the statistic per group rather than globally.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with missing values filled.
 
 **Example** *(from verified snippet)*
 
@@ -2137,6 +2239,22 @@ Add random noise (jitter) to a numeric column.
 jitter(self, column: str, target_column: str, scale: float = 0.01, seed: Optional[int] = None) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column** — str
+  Name of the source numeric column.
+- **target_column** — str
+  Name of the output column.
+- **scale** — float, default 0.01
+  Multiplier applied to ``random()`` (a uniform ``[0,1)``).
+- **seed** — int, optional
+  PRNG seed for reproducibility (same normalization as :meth:`shuffle`).
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with ``target_column`` added.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -2154,6 +2272,19 @@ Encode categorical columns with numerical labels.
 ```python
 label_encode(self, columns: Union[str, List[str]], suffix: str = '_encoded') -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **columns** — str or list of str
+  Columns to label-encode. New columns are appended with
+  ``suffix``; the originals are dropped.
+- **suffix** — str, default '_encoded'
+  Suffix for the output columns.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the encoded columns.
 
 **Example** *(from verified snippet)*
 
@@ -2173,6 +2304,20 @@ Find and replace values in a column.
 find_replace(self, column: str, value_pairs: Dict[str, str], target_column: Optional[str] = None) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column** — str
+  Name of the source column.
+- **value_pairs** — dict
+  ``{find: replace}`` mapping applied via SQL ``CASE WHEN``.
+- **target_column** — str, optional
+  Name of the output column; defaults to overwriting ``column``.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the replaced column.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -2191,6 +2336,18 @@ Return a column with cumulative count of unique values.
 count_cumulative_unique(self, column: str, dest_column: str = 'cumulative_unique') -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column** — str
+  Source column to count uniques from.
+- **dest_column** — str, default 'cumulative_unique'
+  Name of the appended counter column.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with ``dest_column`` appended.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -2208,6 +2365,19 @@ Expand relation to include all possible combinations of specified columns.
 ```python
 complete(self, columns: Union[str, List[str]], fill_value: Any = None) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **columns** — str or list of str
+  Columns to expand; their Cartesian product is added, missing
+  combinations appear as ``NULL`` (or ``fill_value`` if given).
+- **fill_value** — Any, optional
+  Replacement for cells in newly-added rows.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the completed grid.
 
 **Example** *(from verified snippet)*
 
