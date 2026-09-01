@@ -23,6 +23,18 @@ class patterns(str):
     ``str`` so that the compiled pattern can also flow through the
     ``select_columns`` DSL unchanged, while still being usable directly
     via ``re.search(patterns('foo'), text)``.
+
+    Parameters
+    ----------
+    regex_pattern : str
+        Regular expression source. Stored as a string subclass instance
+        with a ``.compiled`` property that lazily compiles the pattern.
+
+    Returns
+    -------
+    None
+        Construction has no side effects; ``.compiled`` compiles on first
+        access.
     """
 
     @property
@@ -47,6 +59,16 @@ class DropLabel:
     output, matching pyjanitor's ``DropLabel`` dataclass semantics::
 
         dj.select_columns([DropLabel('unwanted'), 'keep_me'])
+
+    Parameters
+    ----------
+    label : str
+        Column name to mark as excluded from a ``select_columns`` call.
+
+    Returns
+    -------
+    None
+        DropLabel is a sentinel; construction has no side effects.
     """
 
     label: str
@@ -1604,7 +1626,20 @@ class DuckJanitor:
     # ---------------------------------------------------------------
 
     def rename_columns(self, old_name: str, new_name: str) -> 'DuckJanitor':
-        """Alias of :meth:`rename_column` for the pyjanitor plural name."""
+        """Alias of :meth:`rename_column` for the pyjanitor plural name.
+
+        Parameters
+        ----------
+        old_name : str
+            Current column name.
+        new_name : str
+            New column name.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the column renamed.
+        """
         return self.rename_column(old_name, new_name)
 
     def truncate_datetime_dataframe(
@@ -1857,6 +1892,18 @@ class DuckJanitor:
     def add_columns(self, column_values: dict) -> 'DuckJanitor':
         """Alias of :meth:`add_column` accepting a dict of column→values
         so multiple columns can be added in a single chained call.
+
+        Parameters
+        ----------
+        column_values : dict
+            ``{column_name: value_or_callable}`` mapping; each entry is
+            added in turn (callables are applied row-wise, scalars are
+            broadcast).
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with each new column appended.
         """
         out = self
         for col, vals in column_values.items():
@@ -2044,7 +2091,18 @@ class DuckJanitor:
         return DuckJanitor(new_relation, self._connection)
 
     def toset(self, column: str) -> list:
-        """Return the unique sorted values of ``column`` as a Python list (R: ``toset``)."""
+        """Return the unique sorted values of ``column`` as a Python list (R: ``toset``).
+
+        Parameters
+        ----------
+        column : str
+            Name of the column whose distinct values to return.
+
+        Returns
+        -------
+        list
+            Distinct values of ``column``, sorted ascending.
+        """
         temp_name = f'_toset_{id(self._relation)}'
         self._connection.register(temp_name, self._relation)
         rows = self._connection.execute(
@@ -2054,7 +2112,18 @@ class DuckJanitor:
         return [r[0] for r in rows]
 
     def take_first(self, n: int = 1) -> 'DuckJanitor':
-        """Return a relation containing only the first ``n`` rows (R: ``take_first``)."""
+        """Return a relation containing only the first ``n`` rows (R: ``take_first``).
+
+        Parameters
+        ----------
+        n : int, default 1
+            Number of rows to keep; must be >= 0.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, restricted to the first ``n`` rows.
+        """
         if n < 0:
             raise ValueError(f'take_first(): n must be >= 0; got {n}')
         temp_name = f'_take_first_{id(self._relation)}'
@@ -2122,7 +2191,21 @@ class DuckJanitor:
         return DuckJanitor(new_relation, self._connection)
 
     def round_to_fraction(self, column: str, denominator: Union[int, float]) -> 'DuckJanitor':
-        """Round ``column`` to the nearest fraction ``1/denominator`` (R: ``round_to_fraction``)."""
+        """Round ``column`` to the nearest fraction ``1/denominator`` (R: ``round_to_fraction``).
+
+        Parameters
+        ----------
+        column : str
+            Name of the numeric column to round.
+        denominator : int or float
+            Denominator of the target fraction (``1/denominator``). Must be
+            non-zero.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with ``<column>_rounded`` appended.
+        """
         if denominator == 0:
             raise ValueError('round_to_fraction(): denominator must be non-zero')
         temp_name = f'_rfrac_{id(self._relation)}'
@@ -2138,6 +2221,20 @@ class DuckJanitor:
         """Median-abs-deviation standardisation (R: ``scale_mad``).
 
         ``by`` is one of ``'all'`` (default) or ``'column'``.
+
+        Parameters
+        ----------
+        column : str
+            Name of the numeric column to scale.
+        by : str, default 'all'
+            ``'all'`` centres/scales against the global median+median
+            absolute deviation; ``'column'`` is reserved for per-column
+            variants (currently same behaviour).
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with ``<column>_scaled`` appended.
         """
         if by not in {'all', 'column'}:
             raise ValueError(f"scale_mad(): 'by' must be 'all' or 'column'; got {by!r}")
@@ -2153,7 +2250,18 @@ class DuckJanitor:
         return DuckJanitor(new_relation, self._connection)
 
     def cartesian_product(self, other: 'DuckJanitor') -> 'DuckJanitor':
-        """Return the cartesian (cross) product of ``self`` and ``other``."""
+        """Return the cartesian (cross) product of ``self`` and ``other``.
+
+        Parameters
+        ----------
+        other : DuckJanitor
+            Right-side relation to cross-join with.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the cross-joined columns.
+        """
         if not isinstance(other, DuckJanitor):
             raise TypeError(
                 f'cartesian_product(): other must be a DuckJanitor; got {type(other).__name__}'
@@ -2171,6 +2279,17 @@ class DuckJanitor:
 
         Each callable is invoked with the current DuckJanitor and must return
         a DuckJanitor. Useful for ``pipe``-style chaining across modules.
+
+        Parameters
+        ----------
+        *funcs : Callable
+            Variadic callables, each taking a ``DuckJanitor`` and
+            returning one.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, after every ``func`` has been applied.
         """
         out: DuckJanitor = self
         for func in funcs:
@@ -2321,6 +2440,19 @@ class DuckJanitor:
         """Integer-encode each category in ``columns`` (R: ``factorize_columns``).
 
         ``columns`` defaults to all string-typed columns in the relation.
+
+        Parameters
+        ----------
+        columns : str or list of str, optional
+            Columns to factorize. ``None`` picks every VARCHAR-typed column.
+        append : bool, default False
+            If True, append ``<col>_factor`` columns without dropping the
+            originals; otherwise the originals are replaced.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with integer-encoded columns.
         """
         cur_cols = list(self._relation.columns)
         if columns is None:
@@ -2354,7 +2486,18 @@ class DuckJanitor:
         return DuckJanitor(new_relation, self._connection)
 
     def sort_naturally(self, column: str) -> 'DuckJanitor':
-        """Natural-sort order for a column (R: ``sort_naturally``)."""
+        """Natural-sort order for a column (R: ``sort_naturally``).
+
+        Parameters
+        ----------
+        column : str
+            Name of the column to sort by.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, sorted naturally.
+        """
         import re as _re
         temp_name = f'_natsort_{id(self._relation)}'
         self._connection.register(temp_name, self._relation)
@@ -2376,7 +2519,22 @@ class DuckJanitor:
 
     def sort_column_value_order(self, column: str,
                                   order: List[str]) -> 'DuckJanitor':
-        """Sort rows by an explicit string ordering of ``column`` (R: ``sort_column_value_order``)."""
+        """Sort rows by an explicit string ordering of ``column`` (R: ``sort_column_value_order``).
+
+        Parameters
+        ----------
+        column : str
+            Name of the column whose ordering is imposed.
+        order : list of str
+            Permutation of the column's distinct values, in the desired
+            display order. Values not present in the column are appended
+            at the end.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, sorted by ``column`` per ``order``.
+        """
         if column not in self._relation.columns:
             raise ValueError(f'sort_column_value_order(): column {column!r} not in {list(self._relation.columns)}')
         temp_name = f'_sortorder_{id(self._relation)}'
@@ -2436,6 +2594,20 @@ class DuckJanitor:
         """Update ``columns`` where a SQL ``conditions`` clause holds (R: ``update_where``).
 
         ``columns`` maps column-name to a SQL expression string.
+
+        Parameters
+        ----------
+        columns : dict
+            ``{column_name: sql_expression}`` mapping; each listed column
+            is replaced with ``sql_expression`` (per-row) wherever
+            ``conditions`` evaluates true.
+        conditions : str
+            SQL WHERE-clause fragment (``age > 18``).
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the conditional updates applied.
         """
         if not isinstance(columns, dict) or not columns:
             raise ValueError('update_where(): columns must be a non-empty dict')
@@ -2461,6 +2633,21 @@ class DuckJanitor:
         """Cast all factor-like columns across many DuckJanitors to consistent string types.
 
         Useful as a preprocessing step before concat().
+
+        Parameters
+        ----------
+        *others : DuckJanitor
+            Additional DuckJanitor instances whose VARCHAR columns
+            should be aligned with ``self``.
+        column_names : list of str, optional
+            Subset of column names to align; defaults to every VARCHAR
+            column.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with VARCHAR columns widened to the
+            union of observed types.
         """
         if not others:
             return self

@@ -580,6 +580,18 @@ so multiple columns can be added in a single chained call.
 add_columns(self, column_values: dict) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column_values** — dict
+  ``{column_name: value_or_callable}`` mapping; each entry is
+  added in turn (callables are applied row-wise, scalars are
+  broadcast).
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with each new column appended.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -627,6 +639,18 @@ Alias of :meth:`rename_column` for the pyjanitor plural name.
 ```python
 rename_columns(self, old_name: str, new_name: str) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **old_name** — str
+  Current column name.
+- **new_name** — str
+  New column name.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the column renamed.
 
 **Example** *(from verified snippet)*
 
@@ -3267,6 +3291,19 @@ Integer-encode each category in ``columns`` (R: ``factorize_columns``).
 factorize_columns(self, columns=None, append: bool = False) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **columns** — str or list of str, optional
+  Columns to factorize. ``None`` picks every VARCHAR-typed column.
+- **append** — bool, default False
+  If True, append ``<col>_factor`` columns without dropping the
+  originals; otherwise the originals are replaced.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with integer-encoded columns.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -3287,6 +3324,20 @@ Update ``columns`` where a SQL ``conditions`` clause holds (R: ``update_where``)
 update_where(self, columns: dict, conditions: str) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **columns** — dict
+  ``{column_name: sql_expression}`` mapping; each listed column
+  is replaced with ``sql_expression`` (per-row) wherever
+  ``conditions`` evaluates true.
+- **conditions** — str
+  SQL WHERE-clause fragment (``age > 18``).
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the conditional updates applied.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -3306,6 +3357,21 @@ Useful as a preprocessing step before concat().
 ```python
 unionize_dataframe_categories(self, *others: 'DuckJanitor', column_names=None) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- ***others** — DuckJanitor
+  Additional DuckJanitor instances whose VARCHAR columns
+  should be aligned with ``self``.
+- **column_names** — list of str, optional
+  Subset of column names to align; defaults to every VARCHAR
+  column.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with VARCHAR columns widened to the
+union of observed types.
 
 **Example** *(from verified snippet)*
 
@@ -3328,6 +3394,20 @@ Median-abs-deviation standardisation (R: ``scale_mad``).
 scale_mad(self, column: str, by: str = 'all') -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column** — str
+  Name of the numeric column to scale.
+- **by** — str, default 'all'
+  ``'all'`` centres/scales against the global median+median
+  absolute deviation; ``'column'`` is reserved for per-column
+  variants (currently same behaviour).
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with ``<column>_scaled`` appended.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -3345,6 +3425,19 @@ Round ``column`` to the nearest fraction ``1/denominator`` (R: ``round_to_fracti
 ```python
 round_to_fraction(self, column: str, denominator: Union[int, float]) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **column** — str
+  Name of the numeric column to round.
+- **denominator** — int or float
+  Denominator of the target fraction (``1/denominator``). Must be
+  non-zero.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with ``<column>_rounded`` appended.
 
 **Example** *(from verified snippet)*
 
@@ -3394,6 +3487,16 @@ Return the unique sorted values of ``column`` as a Python list (R: ``toset``).
 toset(self, column: str) -> list
 ```
 
+**Parameters**
+
+- **column** — str
+  Name of the column whose distinct values to return.
+
+**Returns**
+
+list
+Distinct values of ``column``, sorted ascending.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -3411,6 +3514,16 @@ Return a relation containing only the first ``n`` rows (R: ``take_first``).
 ```python
 take_first(self, n: int = 1) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **n** — int, default 1
+  Number of rows to keep; must be >= 0.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, restricted to the first ``n`` rows.
 
 **Example** *(from verified snippet)*
 
@@ -3430,6 +3543,16 @@ Natural-sort order for a column (R: ``sort_naturally``).
 sort_naturally(self, column: str) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column** — str
+  Name of the column to sort by.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, sorted naturally.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -3448,6 +3571,20 @@ Sort rows by an explicit string ordering of ``column`` (R: ``sort_column_value_o
 sort_column_value_order(self, column: str, order: List[str]) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column** — str
+  Name of the column whose ordering is imposed.
+- **order** — list of str
+  Permutation of the column's distinct values, in the desired
+  display order. Values not present in the column are appended
+  at the end.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, sorted by ``column`` per ``order``.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -3465,6 +3602,16 @@ Return the cartesian (cross) product of ``self`` and ``other``.
 ```python
 cartesian_product(self, other: 'DuckJanitor') -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **other** — DuckJanitor
+  Right-side relation to cross-join with.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the cross-joined columns.
 
 **Example** *(from verified snippet)*
 
@@ -3487,6 +3634,17 @@ a DuckJanitor. Useful for ``pipe``-style chaining across modules.
 ```python
 then(self, *funcs) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- ***funcs** — Callable
+  Variadic callables, each taking a ``DuckJanitor`` and
+  returning one.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, after every ``func`` has been applied.
 
 **Example** *(from verified snippet)*
 
@@ -3513,6 +3671,16 @@ output, matching pyjanitor's ``DropLabel`` dataclass semantics::
 DropLabel(label: str) -> None
 ```
 
+**Parameters**
+
+- **label** — str
+  Column name to mark as excluded from a ``select_columns`` call.
+
+**Returns**
+
+None
+DropLabel is a sentinel; construction has no side effects.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -3536,6 +3704,18 @@ via ``re.search(patterns('foo'), text)``.
 ```python
 class patterns(str)
 ```
+
+**Parameters**
+
+- **regex_pattern** — str
+  Regular expression source. Stored as a string subclass instance
+  with a ``.compiled`` property that lazily compiles the pattern.
+
+**Returns**
+
+None
+Construction has no side effects; ``.compiled`` compiles on first
+access.
 
 **Example** *(from verified snippet)*
 
