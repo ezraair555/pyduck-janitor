@@ -7,7 +7,7 @@
 **DuckDB-backed pyjanitor for high-performance data cleaning on large datasets**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![PyPI version](https://badge.fury.io/py/pyduck-janitor.svg)](https://badge.fury.io/py/pyduck-janitor)
+[![Status: pre-release](https://img.shields.io/badge/status-pre--release-orange.svg)](https://github.com/ezraair555/pyduck-janitor)
 
 The objective of this package is to perform data cleaning using an expressive grammar that coheres with the tidyverse design framework, but powered by [DuckDB](https://duckdb.org/) for high-performance execution on large datasets. The package is centered around data cleaning verbs, supplemented with many utilities for data transformation and manipulation.
 
@@ -38,15 +38,24 @@ The core functionality of pyduck-janitor is organized around several main groups
 
 ## Installation
 
+> **Note:** `pyduck-janitor` is not yet published to PyPI. Until the first
+> release is cut, install it directly from this repository:
+
 ```bash
-pip install pyduck-janitor
+git clone https://github.com/ezraair555/pyduck-janitor.git
+cd pyduck-janitor
+pip install -e ".[dev]"
 ```
 
-For the development version:
+The editable install (`-e`) registers the package against your local clone,
+so any source edits are picked up on the next import. The `[dev]` extra pulls
+in the test + lint dependencies used by `pytest`, `ruff`, and the API-doc
+generator.
+
+Once the first release is published, install via:
 
 ```bash
-cd /home/lucas/.openclaw/workspace/pyduck-janitor
-pip install -e ".[dev]"
+pip install pyduck-janitor
 ```
 
 ## Quick Start
