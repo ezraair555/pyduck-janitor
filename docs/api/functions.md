@@ -1509,6 +1509,21 @@ Perform groupby aggregation.
 groupby_agg(self, by: Union[str, List[str]], aggregations: Dict[str, Union[str, Dict]]) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **by** — str or list of str
+  Column name(s) to group by.
+- **aggregations** — dict
+  Mapping ``{new_column_name: agg_spec}`` where ``agg_spec``
+  is either a string (``'mean'``, ``'sum'``, ``'min'``,
+  ``'max'``, ``'count'``, ``'first'``, ``'last'``) or a
+  dict with ``'agg'``/``'column'`` keys for full control.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the aggregated columns.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -1526,6 +1541,22 @@ Get top k rows within each group based on a column.
 ```python
 groupby_topk(self, by: Union[str, List[str]], column: str, k: int, ascending: bool = False) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **by** — str or list of str
+  Column name(s) to define groups.
+- **column** — str
+  Column to rank within each group.
+- **k** — int
+  Number of rows to keep per group.
+- **ascending** — bool, default False
+  If True, keep the bottom-k rather than top-k.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, restricted to top-k rows per group.
 
 **Example** *(from verified snippet)*
 
@@ -1545,6 +1576,21 @@ Create a column based on multiple conditions (SQL CASE WHEN).
 case_when(self, conditions: List[tuple], target_column: str, default: Optional[Any] = None) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **conditions** — list of tuple
+  Each tuple is ``(condition_str, value)``; ``condition_str``
+  is a SQL fragment evaluated against the relation.
+- **target_column** — str
+  Name of the output column.
+- **default** — Any, optional
+  Fallback value when no condition matches (``NULL`` if unset).
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with ``target_column`` added.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -1559,9 +1605,24 @@ case_when(self, conditions: List[tuple], target_column: str, default: Optional[A
 
 Convert a currency column to numeric.
 
+Strips currency symbols ($, €, £, ¥, comma, space) and parses
+parenthesised negatives (``(1,234.56)`` → ``-1234.56``).
+
 ```python
 currency_column_to_numeric(self, column: str, target_column: Optional[str] = None) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **column** — str
+  Name of the currency column.
+- **target_column** — str, optional
+  Name of the output column; defaults to overwriting ``column``.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the numeric column in place.
 
 **Example** *(from verified snippet)*
 
@@ -1581,6 +1642,22 @@ Convert a column to date type.
 convert_date(self, column: str, target_column: Optional[str] = None, date_format: Optional[str] = None) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column** — str
+  Name of the column to convert. Strings are parsed with
+  ``date_format`` if given, otherwise DuckDB's
+  ``TRY_CAST(... AS DATE)`` is used.
+- **target_column** — str, optional
+  Name of the output column; defaults to overwriting ``column``.
+- **date_format** — str, optional
+  ``strftime``-style format string (``'%Y-%m-%d'``).
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the parsed DATE column.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -1599,6 +1676,22 @@ Alias of :meth:`convert_date` matching pyjanitor's name.
 convert_to_date(self, column: str, date_format: Optional[str] = None, target_column: Optional[str] = None, **kwargs) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column** — str
+  Name of the column to convert.
+- **date_format** — str, optional
+  ``strftime``-style format string.
+- **target_column** — str, optional
+  Name of the output column.
+- **kwargs**
+  Accepted for signature parity; ignored.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the parsed DATE column.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -1616,6 +1709,22 @@ Alias of :meth:`convert_date` matching pyjanitor's name.
 ```python
 convert_to_datetime(self, column: str, date_format: Optional[str] = None, target_column: Optional[str] = None, **kwargs) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **column** — str
+  Name of the column to convert.
+- **date_format** — str, optional
+  ``strftime``-style format string.
+- **target_column** — str, optional
+  Name of the output column.
+- **kwargs**
+  Accepted for signature parity; ignored.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the parsed TIMESTAMP column.
 
 **Example** *(from verified snippet)*
 
@@ -1670,6 +1779,19 @@ bug adjustment). 1 = 1900-01-01.
 convert_excel_date(self, column: str, target_column: Optional[str] = None) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column** — str
+  Name of the numeric Excel-serial column.
+- **target_column** — str, optional
+  Name of the output TIMESTAMP column; defaults to
+  ``column + '_datetime'``.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the new TIMESTAMP column added.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -1690,6 +1812,19 @@ the DuckDB TIMESTAMP epoch (1970-01-01) is 719529 days.
 ```python
 convert_matlab_date(self, column: str, target_column: Optional[str] = None) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **column** — str
+  Name of the numeric MATLAB-datenum column.
+- **target_column** — str, optional
+  Name of the output TIMESTAMP column; defaults to
+  ``column + '_datetime'``.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the new TIMESTAMP column added.
 
 **Example** *(from verified snippet)*
 
@@ -1712,6 +1847,19 @@ by ``86400`` yields seconds.
 excel_time_to_numeric(self, column: str, target_column: Optional[str] = None) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column** — str
+  Name of the column holding the Excel time fraction.
+- **target_column** — str, optional
+  Name of the output numeric column; defaults to
+  ``column + '_seconds'``.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the new seconds column added.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -1729,6 +1877,19 @@ Convert a SAS numeric date column (days since 1960-01-01) to TIMESTAMP.
 ```python
 sas_numeric_to_date(self, column: str, target_column: Optional[str] = None) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **column** — str
+  Name of the numeric SAS-date column.
+- **target_column** — str, optional
+  Name of the output TIMESTAMP column; defaults to
+  ``column + '_datetime'``.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the new TIMESTAMP column added.
 
 **Example** *(from verified snippet)*
 
@@ -1748,6 +1909,22 @@ Cast ``column`` to a TIMESTAMP using DuckDB ``strptime`` (R: ``to_datetime``).
 to_datetime(self, column: str, format: Optional[str] = None, target_column: Optional[str] = None) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column** — str
+  Name of the string / numeric column to cast.
+- **format** — str, optional
+  ``strftime``-style format; if omitted, DuckDB's
+  ``TRY_CAST(... AS TIMESTAMP)`` is used.
+- **target_column** — str, optional
+  Name of the output TIMESTAMP column; defaults to
+  ``column + '_ts'``.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the new TIMESTAMP column added.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -1766,6 +1943,21 @@ Truncate a datetime column to a specified unit.
 truncate_datetime(self, column: str, unit: str = 'day', target_column: Optional[str] = None) -> 'DuckJanitor'
 ```
 
+**Parameters**
+
+- **column** — str
+  Name of the TIMESTAMP / DATE column to truncate.
+- **unit** — str, default 'day'
+  One of ``'year'``, ``'quarter'``, ``'month'``, ``'week'``,
+  ``'day'``, ``'hour'``, ``'minute'``, ``'second'``.
+- **target_column** — str, optional
+  Name of the output column; defaults to overwriting ``column``.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the truncated column.
+
 **Example** *(from verified snippet)*
 
 ```python
@@ -1783,6 +1975,20 @@ Alias of :meth:`truncate_datetime` matching pyjanitor's name.
 ```python
 truncate_datetime_dataframe(self, column: str, unit: str = 'day', target_column: Optional[str] = None) -> 'DuckJanitor'
 ```
+
+**Parameters**
+
+- **column** — str
+  Name of the TIMESTAMP / DATE column to truncate.
+- **unit** — str, default 'day'
+  Truncation unit (see :meth:`truncate_datetime`).
+- **target_column** — str, optional
+  Name of the output column.
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with the truncated column.
 
 **Example** *(from verified snippet)*
 

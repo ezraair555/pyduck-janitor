@@ -1048,42 +1048,140 @@ class DuckJanitor:
     
     def groupby_agg(self, by: Union[str, List[str]],
                     aggregations: Dict[str, Union[str, Dict]]) -> 'DuckJanitor':
-        """Perform groupby aggregation."""
+        """Perform groupby aggregation.
+
+        Parameters
+        ----------
+        by : str or list of str
+            Column name(s) to group by.
+        aggregations : dict
+            Mapping ``{new_column_name: agg_spec}`` where ``agg_spec``
+            is either a string (``'mean'``, ``'sum'``, ``'min'``,
+            ``'max'``, ``'count'``, ``'first'``, ``'last'``) or a
+            dict with ``'agg'``/``'column'`` keys for full control.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the aggregated columns.
+        """
         from .cleaning_ops_extended import groupby_agg as _groupby_agg
         new_relation = _groupby_agg(self._relation, by, aggregations, self._connection)
         return DuckJanitor(new_relation, self._connection)
     
     def groupby_topk(self, by: Union[str, List[str]], column: str,
                      k: int, ascending: bool = False) -> 'DuckJanitor':
-        """Get top k rows within each group based on a column."""
+        """Get top k rows within each group based on a column.
+
+        Parameters
+        ----------
+        by : str or list of str
+            Column name(s) to define groups.
+        column : str
+            Column to rank within each group.
+        k : int
+            Number of rows to keep per group.
+        ascending : bool, default False
+            If True, keep the bottom-k rather than top-k.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, restricted to top-k rows per group.
+        """
         from .cleaning_ops_extended import groupby_topk as _groupby_topk
         new_relation = _groupby_topk(self._relation, by, column, k, ascending, self._connection)
         return DuckJanitor(new_relation, self._connection)
     
     def case_when(self, conditions: List[tuple], target_column: str,
                   default: Optional[Any] = None) -> 'DuckJanitor':
-        """Create a column based on multiple conditions (SQL CASE WHEN)."""
+        """Create a column based on multiple conditions (SQL CASE WHEN).
+
+        Parameters
+        ----------
+        conditions : list of tuple
+            Each tuple is ``(condition_str, value)``; ``condition_str``
+            is a SQL fragment evaluated against the relation.
+        target_column : str
+            Name of the output column.
+        default : Any, optional
+            Fallback value when no condition matches (``NULL`` if unset).
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with ``target_column`` added.
+        """
         from .cleaning_ops_extended import case_when as _case_when
         new_relation = _case_when(self._relation, conditions, target_column, default, self._connection)
         return DuckJanitor(new_relation, self._connection)
     
     def currency_column_to_numeric(self, column: str,
                                    target_column: Optional[str] = None) -> 'DuckJanitor':
-        """Convert a currency column to numeric."""
+        """Convert a currency column to numeric.
+
+        Strips currency symbols ($, €, £, ¥, comma, space) and parses
+        parenthesised negatives (``(1,234.56)`` → ``-1234.56``).
+
+        Parameters
+        ----------
+        column : str
+            Name of the currency column.
+        target_column : str, optional
+            Name of the output column; defaults to overwriting ``column``.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the numeric column in place.
+        """
         from .cleaning_ops_extended import currency_column_to_numeric as _currency_column_to_numeric
         new_relation = _currency_column_to_numeric(self._relation, column, target_column, self._connection)
         return DuckJanitor(new_relation, self._connection)
     
     def convert_date(self, column: str, target_column: Optional[str] = None,
                      date_format: Optional[str] = None) -> 'DuckJanitor':
-        """Convert a column to date type."""
+        """Convert a column to date type.
+
+        Parameters
+        ----------
+        column : str
+            Name of the column to convert. Strings are parsed with
+            ``date_format`` if given, otherwise DuckDB's
+            ``TRY_CAST(... AS DATE)`` is used.
+        target_column : str, optional
+            Name of the output column; defaults to overwriting ``column``.
+        date_format : str, optional
+            ``strftime``-style format string (``'%Y-%m-%d'``).
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the parsed DATE column.
+        """
         from .cleaning_ops_extended import convert_date as _convert_date
         new_relation = _convert_date(self._relation, column, target_column, date_format, self._connection)
         return DuckJanitor(new_relation, self._connection)
     
     def truncate_datetime(self, column: str, unit: str = 'day',
                          target_column: Optional[str] = None) -> 'DuckJanitor':
-        """Truncate a datetime column to a specified unit."""
+        """Truncate a datetime column to a specified unit.
+
+        Parameters
+        ----------
+        column : str
+            Name of the TIMESTAMP / DATE column to truncate.
+        unit : str, default 'day'
+            One of ``'year'``, ``'quarter'``, ``'month'``, ``'week'``,
+            ``'day'``, ``'hour'``, ``'minute'``, ``'second'``.
+        target_column : str, optional
+            Name of the output column; defaults to overwriting ``column``.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the truncated column.
+        """
         from .cleaning_ops_extended import truncate_datetime as _truncate_datetime
         new_relation = _truncate_datetime(self._relation, column, unit, target_column, self._connection)
         return DuckJanitor(new_relation, self._connection)
@@ -1249,21 +1347,70 @@ class DuckJanitor:
         unit: str = 'day',
         target_column: Optional[str] = None,
     ) -> 'DuckJanitor':
-        """Alias of :meth:`truncate_datetime` matching pyjanitor's name."""
+        """Alias of :meth:`truncate_datetime` matching pyjanitor's name.
+
+        Parameters
+        ----------
+        column : str
+            Name of the TIMESTAMP / DATE column to truncate.
+        unit : str, default 'day'
+            Truncation unit (see :meth:`truncate_datetime`).
+        target_column : str, optional
+            Name of the output column.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the truncated column.
+        """
         return self.truncate_datetime(column=column, unit=unit,
                                           target_column=target_column)
 
     def convert_to_date(self, column: str, date_format: Optional[str] = None,
                          target_column: Optional[str] = None,
                          **kwargs) -> 'DuckJanitor':
-        """Alias of :meth:`convert_date` matching pyjanitor's name."""
+        """Alias of :meth:`convert_date` matching pyjanitor's name.
+
+        Parameters
+        ----------
+        column : str
+            Name of the column to convert.
+        date_format : str, optional
+            ``strftime``-style format string.
+        target_column : str, optional
+            Name of the output column.
+        **kwargs
+            Accepted for signature parity; ignored.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the parsed DATE column.
+        """
         return self.convert_date(column=column, target_column=target_column,
                                     date_format=date_format)
 
     def convert_to_datetime(self, column: str, date_format: Optional[str] = None,
                               target_column: Optional[str] = None,
                               **kwargs) -> 'DuckJanitor':
-        """Alias of :meth:`convert_date` matching pyjanitor's name."""
+        """Alias of :meth:`convert_date` matching pyjanitor's name.
+
+        Parameters
+        ----------
+        column : str
+            Name of the column to convert.
+        date_format : str, optional
+            ``strftime``-style format string.
+        target_column : str, optional
+            Name of the output column.
+        **kwargs
+            Accepted for signature parity; ignored.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the parsed TIMESTAMP column.
+        """
         return self.convert_date(column=column, target_column=target_column,
                                     date_format=date_format)
 
@@ -1310,6 +1457,19 @@ class DuckJanitor:
 
         Excel's serial date origin is 1899-12-30 (with the 1900 leap-year
         bug adjustment). 1 = 1900-01-01.
+
+        Parameters
+        ----------
+        column : str
+            Name of the numeric Excel-serial column.
+        target_column : str, optional
+            Name of the output TIMESTAMP column; defaults to
+            ``column + '_datetime'``.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the new TIMESTAMP column added.
         """
         out = target_column or f'{column}_datetime'
         temp_name = f'_excel_date_{id(self._relation)}'
@@ -1328,6 +1488,19 @@ class DuckJanitor:
 
         MATLAB datenum origin is 0000-01-01; 1 = 0000-01-01. The offset to
         the DuckDB TIMESTAMP epoch (1970-01-01) is 719529 days.
+
+        Parameters
+        ----------
+        column : str
+            Name of the numeric MATLAB-datenum column.
+        target_column : str, optional
+            Name of the output TIMESTAMP column; defaults to
+            ``column + '_datetime'``.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the new TIMESTAMP column added.
         """
         out = target_column or f'{column}_datetime'
         temp_name = f'_matlab_date_{id(self._relation)}'
@@ -1569,6 +1742,19 @@ class DuckJanitor:
 
         Excel stores time-of-day as the fractional part of a day; multiplying
         by ``86400`` yields seconds.
+
+        Parameters
+        ----------
+        column : str
+            Name of the column holding the Excel time fraction.
+        target_column : str, optional
+            Name of the output numeric column; defaults to
+            ``column + '_seconds'``.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the new seconds column added.
         """
         out = target_column or f'{column}_seconds'
         temp_name = f'_excel_time_{id(self._relation)}'
@@ -1582,7 +1768,21 @@ class DuckJanitor:
 
     def sas_numeric_to_date(self, column: str,
                               target_column: Optional[str] = None) -> 'DuckJanitor':
-        """Convert a SAS numeric date column (days since 1960-01-01) to TIMESTAMP."""
+        """Convert a SAS numeric date column (days since 1960-01-01) to TIMESTAMP.
+
+        Parameters
+        ----------
+        column : str
+            Name of the numeric SAS-date column.
+        target_column : str, optional
+            Name of the output TIMESTAMP column; defaults to
+            ``column + '_datetime'``.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the new TIMESTAMP column added.
+        """
         out = target_column or f'{column}_datetime'
         temp_name = f'_sasdate_{id(self._relation)}'
         self._connection.register(temp_name, self._relation)
@@ -2295,7 +2495,24 @@ class DuckJanitor:
 
     def to_datetime(self, column: str, format: Optional[str] = None,
                       target_column: Optional[str] = None) -> 'DuckJanitor':
-        """Cast ``column`` to a TIMESTAMP using DuckDB ``strptime`` (R: ``to_datetime``)."""
+        """Cast ``column`` to a TIMESTAMP using DuckDB ``strptime`` (R: ``to_datetime``).
+
+        Parameters
+        ----------
+        column : str
+            Name of the string / numeric column to cast.
+        format : str, optional
+            ``strftime``-style format; if omitted, DuckDB's
+            ``TRY_CAST(... AS TIMESTAMP)`` is used.
+        target_column : str, optional
+            Name of the output TIMESTAMP column; defaults to
+            ``column + '_ts'``.
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with the new TIMESTAMP column added.
+        """
         out = target_column or f'{column}_ts'
         if column not in self._relation.columns:
             raise ValueError(f'to_datetime(): unknown column {column!r}')
