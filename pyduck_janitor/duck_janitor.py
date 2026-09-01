@@ -1605,68 +1605,46 @@ class DuckJanitor:
         return DuckJanitor(new_relation, self._connection)
 
     def expand_grid(self, *tables) -> 'DuckJanitor':
-        """Cross-join an arbitrary number of relations or value lists (R: ``expand_grid``).
+        """Cross-join an arbitrary number of relations (R: ``expand_grid``).
 
-        Each argument may be either a DuckJanitor or an iterable of value
-        combinations to be materialised.
+        Each argument must be a ``DuckJanitor``. The result contains one row
+        for every combination of rows across all inputs (a cartesian product
+        in the tidyverse sense). Column names are preserved; on collision,
+        the later table's column is suffixed ``_1``, ``_2``, ... in order.
         """
         if not tables:
             raise ValueError('expand_grid(): need at least one input')
-        # Materialise each input into a relation, then cross-join them all.
-        temp_self = f'_expand_grid_self_{id(self._relation)}'
-        self._connection.register(temp_self, self._relation)
-        result_name = temp_self
-        result_cols = [f'{result_name}."{c}"' for c in self._relation.columns]
-        for i, t in enumerate(tables):
-            try:
-                # Validate DuckJanitor.
-                rel = t._relation
-                tname = f'_expand_grid_x_{i}_{id(rel)}'
-                self._connection.register(tname, t._relation)
-                result_name = f'_expand_grid_res_{i}_{id(rel)}'
-                self._connection.execute(
-                    f'CREATE OR REPLACE TEMPORARY TABLE {result_name} AS '
-                    f'SELECT {", ".join(result_cols + [f"{tname}.*"])} '
-                    f'FROM (SELECT * FROM {tname}) CROSS JOIN (SELECT * FROM {temp_self})'
+        sources = [self] + list(tables)
+        for t in sources:
+            if not isinstance(t, DuckJanitor):
+                raise TypeError(
+                    'expand_grid(): all arguments must be DuckJanitor instances; '
+                    f'got {type(t).__name__}'
                 )
-                # After the CREATE, the result_name relation is the table itself.
-                # Re-point for the next iteration.
-                new_relation = self._connection.table(result_name)
-                # Update temp_self to result_name for next round.
-                temp_self = result_name
-                result_cols = [f'{result_name}."{c}"' for c in new_relation.columns]
-            except AttributeError:
-                # Otherwise treat as an iterable of single-column rows.
-                rows = list(t)
-                if not rows:
-                    raise ValueError(f'expand_grid(): arg {i} is empty')
-                # Build a single-column relation.
-                col_name = f'value_{i}'
-                aux_name = f'_expand_grid_aux_{i}_{id(self._relation)}'
-                self._connection.execute(
-                    f"CREATE OR REPLACE TEMPORARY TABLE {aux_name}({col_name}) AS "
-                    f"SELECT * FROM (VALUES " +
-                    ', '.join(['(\'' + str(v).replace("'", "''") + '\')' for v in rows]) +
-                    f")"
-                )
-                result_name = f'_expand_grid_res_{i}_{id(self._relation)}'
-                self._connection.execute(
-                    f'CREATE OR REPLACE TEMPORARY TABLE {result_name} AS '
-                    f'SELECT {", ".join(result_cols + [f"{aux_name}.*"])} '
-                    f'CROSS JOIN (SELECT * FROM {aux_name})'
-                )
-                new_relation = self._connection.table(result_name)
-                temp_self = result_name
-                result_cols = [f'{result_name}."{c}"' for c in new_relation.columns]
-        final_name = f'_expand_grid_final_{id(self._relation)}'
-        self._connection.execute(f'CREATE OR REPLACE TEMPORARY VIEW {final_name} AS SELECT * FROM {result_name}')
-        new_relation = self._connection.view(final_name)
-        # Best-effort cleanup of aux temp tables.
-        for i in range(len(tables)):
-            try:
-                self._connection.execute(f'DROP TABLE IF EXISTS _expand_grid_aux_{i}_{id(self._relation)}')
-            except Exception:
-                pass
+        # Register every source on the calling connection, build a single
+        # flat CROSS JOIN query, and disambiguate duplicate column names.
+        registered = []
+        for i, t in enumerate(sources):
+            src_name = f'_eg_{i}_{id(self)}'
+            self._connection.register(src_name, t._relation)
+            registered.append((src_name, list(t._relation.columns)))
+        seen_names: dict[str, int] = {}
+        select_parts = []
+        for src_name, cols in registered:
+            for c in cols:
+                if c in seen_names:
+                    seen_names[c] += 1
+                    alias = f'{c}_{seen_names[c]}'
+                else:
+                    seen_names[c] = 0
+                    alias = c
+                select_parts.append(f'{src_name}."{c}" AS "{alias}"')
+        query = (
+            'SELECT ' + ', '.join(select_parts) +
+            ' FROM ' +
+            ' CROSS JOIN '.join(name for name, _ in registered)
+        )
+        new_relation = self._connection.query(query)
         return DuckJanitor(new_relation, self._connection)
 
     def change_index_dtype(self, dtype: str,

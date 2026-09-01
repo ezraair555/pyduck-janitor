@@ -99,6 +99,8 @@ dj.select_columns(['company*', DropLabel('company3')])  # exclude one column
 
 pyduck-janitor implements the **complete pyjanitor documented API** (94/94 functions — verified against the pyjanitor API reference) plus 18 DuckDB-specific extensions, exposed as **109 chainable methods** on `DuckJanitor`.
 
+> 📖 **Full function-by-function reference with verified examples:** [`docs/api/functions.md`](docs/api/functions.md) — description, signature, parameters, returns, raises, and a runnable example for every function (modeled on [pyjanitor's API functions page](https://pyjanitor-devs.github.io/pyjanitor/api/functions/)).
+
 ### Core cleaning verbs (`cleaning_ops.py`)
 - [`clean_names()`](https://pyjanitor-devs.github.io/pyjanitor/api/functions/#janitor.functions.clean_names.clean_names) - Clean column names
 - [`remove_columns()`](https://pyjanitor-devs.github.io/pyjanitor/api/functions/#janitor.functions.remove_columns.remove_columns) - Remove columns
