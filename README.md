@@ -272,6 +272,55 @@ explicit opt-in, and supports the bundled companion wheel (offline), any
 HuggingFace model (`hf:org/model`), or a local path. Full guide:
 [`docs/text_ops.md`](docs/text_ops.md).
 
+### Adding a HuggingFace model
+
+Any sentence-transformers-compatible model from HuggingFace Hub works.
+Pull it into the local cache by passing an `hf:`-prefixed identifier:
+
+```python
+import pyduck_janitor as pj
+
+# Public model — direct fetch
+pj.embed_install("hf:sentence-transformers/all-MiniLM-L6-v2")
+pj.embed_install("hf:BAAI/bge-small-en-v1.5")              # better quality, 33M params
+pj.embed_install("hf:BAAI/bge-base-en-v1.5")              # bigger, ~110M params
+pj.embed_install("hf:intfloat/multilingual-e5-small")     # multilingual
+
+# Pin a specific revision (sha or tag) for reproducibility
+pj.embed_install("hf:org/model@sha256:abc123...")
+pj.embed_install("hf:org/model@refs/pr/42")
+
+# Gated / private models — set HF_TOKEN in your env, then call as usual
+#   export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxx
+pj.embed_install("hf:meta-llama/Llama-Embed-8B")
+
+# Or a local directory you've prepared (no HuggingFace needed)
+pj.embed_install("/opt/models/my-finetuned-encoder")
+```
+
+Once installed, the model is available everywhere in your workflow:
+
+```python
+dj = DuckJanitor.from_pandas(df)
+dj = embed_column(dj, "text", model="hf:BAAI/bge-small-en-v1.5")
+dj = build_vector_index(dj, metric="cosine")
+hits = vector_search(dj, "lazy dog", model="hf:BAAI/bge-small-en-v1.5", top_k=5)
+```
+
+Manage the cache over time:
+
+```python
+pj.embed_list_installed()
+#    model                              size_human  has_config  has_weights
+#  0  sentence-transformers/all-MiniLM-L6-v2    90.2 MB        True         True
+#  1  BAAI/bge-small-en-v1.5                   33.4 MB        True         True
+
+pj.embed_remove("hf:BAAI/bge-small-en-v1.5")
+```
+
+Override the cache location with `PYDUCK_EMBED_CACHE=/some/path` when you
+need shared storage across venvs, CI runners, or read-only filesystems.
+
 ## Key Features
 
 ### Lazy Evaluation
