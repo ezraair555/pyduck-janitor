@@ -63,14 +63,6 @@ from .cleaning_ops_final import (
     process_text,
 )
 from .duck_janitor import DropLabel, DuckJanitor, patterns
-from .extensions import ExtensionNotAvailable
-from .text_ops import (
-    build_fts_index,
-    drop_fts_index,
-    keyword_filter,
-    search_text,
-    text_normalize,
-)
 from .embeddings import (
     DEFAULT_EMBED_MODEL,
     EmbeddingsNotAvailable,
@@ -82,6 +74,14 @@ from .embeddings import (
     embed_remove,
     fuzzy_dedupe,
     vector_search,
+)
+from .extensions import ExtensionNotAvailable
+from .text_ops import (
+    build_fts_index,
+    drop_fts_index,
+    keyword_filter,
+    search_text,
+    text_normalize,
 )
 
 __version__ = "0.2.0"

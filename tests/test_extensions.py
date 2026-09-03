@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import duckdb
 import pytest
-
 from pyduck_janitor.extensions import ExtensionNotAvailable, load_extension
 
 

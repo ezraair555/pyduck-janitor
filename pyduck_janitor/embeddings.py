@@ -30,20 +30,19 @@ download — embedding a million rows should not fail mid-batch.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import shutil
 import threading
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Optional, Sequence, Union
+from typing import Optional, Union
 
 import duckdb
 import pandas as pd
 
-from .extensions import ExtensionNotAvailable, extension_loaded, load_extension
-from .duck_janitor import DuckJanitor
 from .cleaning_ops import _register_relation
-
+from .duck_janitor import DuckJanitor
+from .extensions import extension_loaded, load_extension
 
 __all__ = [
     "EmbeddingsNotAvailable",
@@ -99,10 +98,7 @@ class EmbeddingsNotAvailable(RuntimeError):
         self.cause = cause
         hint = ""
         if install_command:
-            hint = (
-                f"\n\nHint: install the model with:\n"
-                f"    {install_command}"
-            )
+            hint = f"\n\nHint: install the model with:\n" f"    {install_command}"
         super().__init__(message + hint)
 
 
@@ -141,10 +137,7 @@ def _is_installed(model: str) -> bool:
         return False
     # sentence-transformers needs at least config + weights
     has_config = (md / "config.json").exists()
-    has_weights = (
-        (md / "model.safetensors").exists()
-        or (md / "pytorch_model.bin").exists()
-    )
+    has_weights = (md / "model.safetensors").exists() or (md / "pytorch_model.bin").exists()
     return has_config and has_weights
 
 
@@ -167,9 +160,7 @@ def _bundled_model_path(model: str) -> Optional[Path]:
     except ImportError:
         return None
     pkg_path = Path(pkg.__file__).resolve().parent
-    candidate = pkg_path / "data" / "embeddings" / _slugify(
-        _canonical_model_id(model)
-    )
+    candidate = pkg_path / "data" / "embeddings" / _slugify(_canonical_model_id(model))
     if candidate.exists() and (candidate / "config.json").exists():
         return candidate
     return None
@@ -259,8 +250,7 @@ def _install_from_hf(spec: str) -> Path:
     except ImportError as exc:
         raise EmbeddingsNotAvailable(
             spec,
-            "sentence-transformers is not installed; required for HuggingFace "
-            "model downloads.",
+            "sentence-transformers is not installed; required for HuggingFace " "model downloads.",
             install_command="pip install pyduck-janitor[vss]",
             cause=exc,
         ) from exc
@@ -324,9 +314,7 @@ def embed_list_installed() -> pd.DataFrame:
     for entry in sorted(root.iterdir()):
         if not entry.is_dir():
             continue
-        total = sum(
-            f.stat().st_size for f in entry.rglob("*") if f.is_file()
-        )
+        total = sum(f.stat().st_size for f in entry.rglob("*") if f.is_file())
         rows.append(
             {
                 "model": entry.name.replace("__", "/").replace("_at_", "@"),
@@ -380,19 +368,17 @@ def _get_st():
         except ImportError as exc:
             raise EmbeddingsNotAvailable(
                 DEFAULT_EMBED_MODEL,
-                "sentence-transformers is not installed. Required for embedding "
-                "operations.",
+                "sentence-transformers is not installed. Required for embedding " "operations.",
                 install_command="pip install pyduck-janitor[vss]",
                 cause=exc,
             ) from exc
         import sentence_transformers
+
         _st_module = sentence_transformers
         return _st_module
 
 
-def _encode_texts(
-    texts: Sequence[str], model: str, *, batch_size: int = 64
-) -> list[list[float]]:
+def _encode_texts(texts: Sequence[str], model: str, *, batch_size: int = 64) -> list[list[float]]:
     """Encode ``texts`` with ``model``. Returns a list of float lists."""
     canonical = _canonical_model_id(model)
     if not _is_installed(canonical):
@@ -462,9 +448,7 @@ def embed_column(
 
     # Register a temp table with original cols + new embedding column.
     table_name = _register_relation(conn, dj._relation)
-    embed_df = pd.DataFrame(
-        {target_column: [list(map(float, e)) for e in embeddings]}
-    )
+    embed_df = pd.DataFrame({target_column: [list(map(float, e)) for e in embeddings]})
     embed_table = f"_dj_embed_{table_name.strip('_').strip('\"')}"
     # We embed on the original df, so row order matches. Register
     # the embed table alongside the original.
@@ -515,9 +499,7 @@ def build_vector_index(
     _ensure_vss(conn)
 
     if metric not in {"cosine", "ip", "l2sq"}:
-        raise ValueError(
-            f"metric must be one of cosine/ip/l2sq, got {metric!r}"
-        )
+        raise ValueError(f"metric must be one of cosine/ip/l2sq, got {metric!r}")
 
     table_name = _register_relation(conn, dj._relation)
     if index_name is None:
@@ -541,11 +523,7 @@ def build_vector_index(
         f"CREATE OR REPLACE TABLE {dj._quote(base_name)} AS "
         f"SELECT CAST({dj._quote(embedding_column)} AS FLOAT[{int(dim)}]) AS "
         f"{dj._quote(embedding_column)}, "
-        + ", ".join(
-            dj._quote(c)
-            for c in dj._relation.columns
-            if c != embedding_column
-        )
+        + ", ".join(dj._quote(c) for c in dj._relation.columns if c != embedding_column)
         + f" FROM {table_name}"
     )
     conn.execute(
@@ -615,17 +593,13 @@ def vector_search(
             "supplied. Call build_vector_index() first."
         )
 
-    table_name = getattr(dj, "_vss_table", None) or _register_relation(
-        conn, dj._relation
-    )
+    table_name = getattr(dj, "_vss_table", None) or _register_relation(conn, dj._relation)
     metric_fn = {
         "cosine": "array_cosine_distance",
         "ip": "array_inner_product",
         "l2sq": "array_distance",
     }[metric]
-    embedding_literal = (
-        "[" + ", ".join(f"{float(x):.8f}" for x in embedding) + "]"
-    )
+    embedding_literal = "[" + ", ".join(f"{float(x):.8f}" for x in embedding) + "]"
     sql = (
         f"SELECT *, {metric_fn}({dj._quote(embedding_column)}, "
         f"{embedding_literal}::FLOAT[{len(embedding)}]) "

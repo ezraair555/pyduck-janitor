@@ -20,9 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pyduck_janitor import DuckJanitor
 from pyduck_janitor.extensions import (
-    EXTENSIONS,
     ExtensionNotAvailable,
-    extension_loaded,
     load_extension,
 )
 from pyduck_janitor.text_ops import (
@@ -32,7 +30,6 @@ from pyduck_janitor.text_ops import (
     search_text,
     text_normalize,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -144,9 +141,7 @@ class TestTextNormalize:
             pytest.skip("icu extension not available")
         df = pd.DataFrame({"name": ["HELLO"]})
         dj = DuckJanitor.from_pandas(df)
-        out = text_normalize(
-            dj, "name", lower=False, strip_accents=False
-        ).collect()
+        out = text_normalize(dj, "name", lower=False, strip_accents=False).collect()
         assert out["name"].tolist() == ["HELLO"]
 
     def test_target_column(self, fresh_conn, icu_available):
@@ -154,9 +149,7 @@ class TestTextNormalize:
             pytest.skip("icu extension not available")
         df = pd.DataFrame({"name": ["HELLO"]})
         dj = DuckJanitor.from_pandas(df)
-        out = text_normalize(
-            dj, "name", target_columns="name_clean", strip_accents=False
-        ).collect()
+        out = text_normalize(dj, "name", target_columns="name_clean", strip_accents=False).collect()
         assert "name" in out.columns
         assert "name_clean" in out.columns
         assert out["name_clean"].tolist() == ["hello"]
@@ -173,13 +166,9 @@ class TestTextNormalize:
     def test_multiple_columns(self, fresh_conn, icu_available):
         if not icu_available:
             pytest.skip("icu extension not available")
-        df = pd.DataFrame(
-            {"a": ["HELLO"], "b": ["WORLD"]}
-        )
+        df = pd.DataFrame({"a": ["HELLO"], "b": ["WORLD"]})
         dj = DuckJanitor.from_pandas(df)
-        out = text_normalize(
-            dj, ["a", "b"], strip_accents=False
-        ).collect()
+        out = text_normalize(dj, ["a", "b"], strip_accents=False).collect()
         assert out["a"].tolist() == ["hello"]
         assert out["b"].tolist() == ["world"]
 
@@ -223,9 +212,7 @@ class TestTextNormalize:
         df = pd.DataFrame({"a": ["x"], "b": ["y"]})
         dj = DuckJanitor.from_pandas(df)
         with pytest.raises(ValueError, match="same length"):
-            text_normalize(
-                dj, ["a", "b"], target_columns=["only_one"]
-            )
+            text_normalize(dj, ["a", "b"], target_columns=["only_one"])
 
 
 # ---------------------------------------------------------------------------
@@ -257,24 +244,18 @@ class TestFTSIndex:
             pytest.skip("fts extension not available")
         dj = build_fts_index(small_corpus, "text")
         # Threshold of 0 should keep rows with positive scores.
-        results = search_text(
-            dj, "text", "fox", threshold=0.0
-        )
+        results = search_text(dj, "text", "fox", threshold=0.0)
         # At least one match (we know 'fox' rows are in the corpus).
         assert len(results) >= 1
         # A very high threshold drops everything.
-        results_high = search_text(
-            dj, "text", "fox", threshold=1000.0
-        )
+        results_high = search_text(dj, "text", "fox", threshold=1000.0)
         assert len(results_high) == 0
 
     def test_return_relation(self, small_corpus, fts_available):
         if not fts_available:
             pytest.skip("fts extension not available")
         dj = build_fts_index(small_corpus, "text")
-        rel = search_text(
-            dj, "text", "fox", return_relation=True
-        )
+        rel = search_text(dj, "text", "fox", return_relation=True)
         assert isinstance(rel, DuckJanitor)
 
     def test_drop(self, small_corpus, fts_available):
@@ -316,9 +297,7 @@ class TestKeywordFilter:
     def test_all(self, small_corpus, fts_available):
         if not fts_available:
             pytest.skip("fts extension not available")
-        out = keyword_filter(
-            small_corpus, "text", ["quick", "fox"], mode="all"
-        )
+        out = keyword_filter(small_corpus, "text", ["quick", "fox"], mode="all")
         rows = out.collect()
         # Every result must contain both quick and fox.
         for t in rows["text"]:
@@ -336,9 +315,7 @@ class TestKeywordFilter:
     def test_case_sensitive_on(self, small_corpus, fts_available):
         if not fts_available:
             pytest.skip("fts extension not available")
-        out = keyword_filter(
-            small_corpus, "text", ["FOX"], case_sensitive=True
-        )
+        out = keyword_filter(small_corpus, "text", ["FOX"], case_sensitive=True)
         rows = out.collect()
         # 'FOX' is uppercase, so no rows match (all our text is lowercase).
         assert len(rows) == 0

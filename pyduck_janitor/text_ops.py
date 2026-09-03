@@ -25,16 +25,15 @@ with the exact pip extra to install.
 
 from __future__ import annotations
 
-from typing import Iterable, Optional, Sequence, Union
 import unicodedata
+from collections.abc import Sequence
+from typing import Optional, Union
 
-import duckdb
 import pandas as pd
 
-from .extensions import ExtensionNotAvailable, extension_loaded, load_extension
-from .duck_janitor import DuckJanitor
 from .cleaning_ops import _register_relation
-
+from .duck_janitor import DuckJanitor
+from .extensions import extension_loaded, load_extension
 
 __all__ = [
     "text_normalize",
@@ -142,6 +141,7 @@ def text_normalize(
     # to preserve Unicode semantics and NULL values.
     sql_sources = list(columns)
     if strip_accents or form != "NFC":
+
         def _normalize_scalar(v: object) -> object:
             if pd.isna(v):
                 return v
@@ -190,17 +190,9 @@ def text_normalize(
         else list(transformed.columns)
     )
     replacing = set(target_columns)
-    other_cols = [
-        dj._quote(c)
-        for c in base_columns
-        if c not in replacing
-    ]
+    other_cols = [dj._quote(c) for c in base_columns if c not in replacing]
     prefix = ", ".join(other_cols) + ", " if other_cols else ""
-    select_sql = (
-        f"SELECT {prefix}"
-        + ", ".join(pieces)
-        + f" FROM {table_name}"
-    )
+    select_sql = f"SELECT {prefix}" + ", ".join(pieces) + f" FROM {table_name}"
     new_relation = conn.sql(select_sql)
     return DuckJanitor(new_relation, connection=conn)
 
@@ -216,7 +208,7 @@ def _fts_create_args(
     lower: bool,
     overwrite: bool,
 ) -> str:
-    """Build the option string for CREATE FTS INDEX ... """
+    """Build the option string for CREATE FTS INDEX ..."""
     parts: list[str] = []
     if stemmer != "porter":
         parts.append(f"stemmer = '{stemmer}'")
@@ -290,9 +282,7 @@ def build_fts_index(
     opts = _fts_create_args(stopwords, stemmer, lower, overwrite)
     create_sql = (
         f"PRAGMA create_fts_index("
-        f"'{material_name}', '{rowid_col}', {cols_sql}"
-        + (f", {opts}" if opts else "")
-        + ")"
+        f"'{material_name}', '{rowid_col}', {cols_sql}" + (f", {opts}" if opts else "") + ")"
     )
     conn.execute(create_sql)
 
@@ -389,8 +379,7 @@ def search_text(
     material_table = getattr(dj, "_fts_table", None)
     if material_table is None:
         raise ValueError(
-            "No FTS material table recorded on this DuckJanitor. "
-            "Call build_fts_index() first."
+            "No FTS material table recorded on this DuckJanitor. " "Call build_fts_index() first."
         )
 
     # Escape single quotes in the query (DuckDB string literal).
@@ -400,10 +389,7 @@ def search_text(
     select_cols = "*"
     if score_col is not None:
         select_cols = f"*, {bm25} AS {dj._quote(score_col)}"
-    sql = (
-        f"SELECT {select_cols} FROM {material_table} "
-        f"WHERE {bm25} IS NOT NULL"
-    )
+    sql = f"SELECT {select_cols} FROM {material_table} " f"WHERE {bm25} IS NOT NULL"
     if threshold is not None:
         sql += f" AND {bm25} >= {threshold}"
     sql += f" ORDER BY {bm25} DESC"
@@ -465,7 +451,5 @@ def keyword_filter(
             parts.append(f"lower({col}) LIKE '%' || lower('{esc}') || '%'")
     joiner = " OR " if mode == "any" else " AND "
     where = joiner.join(parts)
-    relation = conn.sql(
-        f"SELECT * FROM {table_name} WHERE {where}"
-    )
+    relation = conn.sql(f"SELECT * FROM {table_name} WHERE {where}")
     return DuckJanitor(relation, connection=conn)

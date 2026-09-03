@@ -9,7 +9,6 @@ without a 90MB download on every CI run.
 from __future__ import annotations
 
 import os
-import shutil
 import sys
 from pathlib import Path
 
@@ -32,7 +31,6 @@ from pyduck_janitor.embeddings import (
     embed_list_installed,
     embed_remove,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -146,8 +144,7 @@ class TestEmbedColumnErrors:
             from pyduck_janitor.embeddings import embed_column
 
             embed_column(dj, "text")
-        assert "sentence-transformers" in str(exc_info.value) or \
-               "Model" in str(exc_info.value)
+        assert "sentence-transformers" in str(exc_info.value) or "Model" in str(exc_info.value)
         assert exc_info.value.install_command is not None
 
     def test_embed_column_accepts_hf_prefixed_model(
@@ -212,16 +209,13 @@ class TestVSSErrors:
         with pytest.raises(ValueError, match="No HNSW index"):
             vector_search(dj, query=[0.1] * 4)
 
-    def test_build_index_with_synthetic_embeddings(
-        self, isolated_cache, vss_available
-    ):
+    def test_build_index_with_synthetic_embeddings(self, isolated_cache, vss_available):
         if not vss_available:
             pytest.skip("vss extension not available")
-        from pyduck_janitor.embeddings import build_vector_index
-
         # Fake an embedding column with random vectors. We don't
         # need a real model for this test.
         import numpy as np
+        from pyduck_janitor.embeddings import build_vector_index
 
         rng = np.random.default_rng(42)
         df = pd.DataFrame(

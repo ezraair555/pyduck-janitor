@@ -52,7 +52,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-          pip install "duckdb==0.9.2" "pandas==2.0.3"
+          pip install "duckdb==1.5.2" "pandas==2.1.4"
       - name: Test
         # -x = stop on first failure (faster feedback for agents)
         # -v  = verbose so an agent can map failures back to specific tests

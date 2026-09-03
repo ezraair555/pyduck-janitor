@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import os
 import threading
-from typing import Iterable, Optional
+from collections.abc import Iterable
+from typing import Optional
 
 import duckdb
 
@@ -119,9 +120,7 @@ def load_extension(
         error is attached as ``__cause__``.
     """
     if name not in EXTENSIONS:
-        raise ValueError(
-            f"Unknown extension '{name}'. Known: {sorted(EXTENSIONS)}"
-        )
+        raise ValueError(f"Unknown extension '{name}'. Known: {sorted(EXTENSIONS)}")
 
     cid = _conn_id(conn)
     with _lock:
@@ -133,8 +132,7 @@ def load_extension(
     if _env_disabled():
         raise ExtensionNotAvailable(
             name,
-            f"Extension loading disabled by PYDUCK_SKIP_EXTENSIONS "
-            f"for '{duckdb_name}'.",
+            f"Extension loading disabled by PYDUCK_SKIP_EXTENSIONS " f"for '{duckdb_name}'.",
             pip_extra=pip_extra,
         )
 

@@ -38,24 +38,23 @@ The core functionality of pyduck-janitor is organized around several main groups
 
 ## Installation
 
-> **Note:** `pyduck-janitor` is not yet published to PyPI. Until the first
-> release is cut, install it directly from this repository:
+Install the released package from PyPI:
+
+```bash
+pip install pyduck-janitor
+```
+
+For Excel and Parquet I/O helpers, install the optional engines with
+`pip install pyduck-janitor[io]`.
+
+For development from a checkout, use the editable install. The `[dev]` extra
+pulls in the test and lint dependencies used by `pytest`, `ruff`, and the
+API-doc generator:
 
 ```bash
 git clone https://github.com/ezraair555/pyduck-janitor.git
 cd pyduck-janitor
 pip install -e ".[dev]"
-```
-
-The editable install (`-e`) registers the package against your local clone,
-so any source edits are picked up on the next import. The `[dev]` extra pulls
-in the test + lint dependencies used by `pytest`, `ruff`, and the API-doc
-generator.
-
-Once the first release is published, install via:
-
-```bash
-pip install pyduck-janitor
 ```
 
 ## Quick Start

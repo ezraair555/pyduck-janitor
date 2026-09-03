@@ -197,7 +197,7 @@ API consistent with from_csv / from_parquet while relying on
 the mature openpyxl/xlrd ecosystem for parsing.
 
 ```python
-from_excel(path: Union[str, pathlib.Path], sheet_name: Union[str, int, NoneType] = 0, header: int = 0, usecols: Union[str, List[str], List[int], NoneType] = None, skiprows: Union[int, List[int], NoneType] = None, nrows: Optional[int] = None, na_values: Optional[Any] = None, keep_default_na: bool = True, dtype: Optional[Dict[str, Any]] = None, engine: Optional[str] = None, **kwargs: Any) -> 'DuckJanitor'
+from_excel(path: Union[str, pathlib.Path], sheet_name: Union[str, int, NoneType] = 0, header: int = 0, usecols: Union[str, list[str], list[int], NoneType] = None, skiprows: Union[int, list[int], NoneType] = None, nrows: Optional[int] = None, na_values: Optional[Any] = None, keep_default_na: bool = True, dtype: Optional[dict[str, Any]] = None, engine: Optional[str] = None, **kwargs: Any) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -253,7 +253,7 @@ so schema inference, compression detection, and glob patterns
 all work out of the box.
 
 ```python
-from_json(path: Union[str, pathlib.Path, List[Union[str, pathlib.Path]]], format: str = 'auto', **kwargs: Any) -> 'DuckJanitor'
+from_json(path: Union[str, pathlib.Path, list[Union[str, pathlib.Path]]], format: str = 'auto', **kwargs: Any) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -297,7 +297,7 @@ A DuckJanitor instance.
 Create a DuckJanitor from Parquet file(s).
 
 ```python
-from_parquet(path: Union[str, pathlib.Path, List[str]]) -> 'DuckJanitor'
+from_parquet(path: Union[str, pathlib.Path, list[str]]) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -516,7 +516,7 @@ Self for method chaining.
 Remove specified columns.
 
 ```python
-remove_columns(self, columns: Union[str, List[str]]) -> 'DuckJanitor'
+remove_columns(self, columns: Union[str, list[str]]) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -544,7 +544,7 @@ Self for method chaining.
 Add a new column.
 
 ```python
-add_column(self, column_name: str, values: Union[Any, List[Any], str], fill_value: Optional[Any] = None) -> 'DuckJanitor'
+add_column(self, column_name: str, values: Union[Any, list[Any], str], fill_value: Optional[Any] = None) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -667,7 +667,7 @@ Self for method chaining, with the column renamed.
 Remove rows with missing values.
 
 ```python
-dropna(self, subset: Union[str, List[str], NoneType] = None, how: str = 'any') -> 'DuckJanitor'
+dropna(self, subset: Union[str, list[str], NoneType] = None, how: str = 'any') -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -894,7 +894,7 @@ falls inside ``[start_date, end_date]``.
 Coalesce multiple columns into a single column.
 
 ```python
-coalesce(self, columns: List[str], target_column: str) -> 'DuckJanitor'
+coalesce(self, columns: list[str], target_column: str) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -954,7 +954,7 @@ Self for method chaining.
 One-hot encode categorical columns.
 
 ```python
-get_dummies(self, columns: Union[str, List[str]], prefix: Optional[str] = None) -> 'DuckJanitor'
+get_dummies(self, columns: Union[str, list[str]], prefix: Optional[str] = None) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -988,7 +988,7 @@ a shell-glob pattern (e.g. ``"v*"``), or a regex prefix (``"re:^v_"``).
 See :func:`pyduck_janitor.cleaning_ops.select_columns` for details.
 
 ```python
-select_columns(self, columns: Union[str, List[str]]) -> 'DuckJanitor'
+select_columns(self, columns: Union[str, list[str]]) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -1065,7 +1065,7 @@ columns.
 Select specific rows by index or condition.
 
 ```python
-select_rows(self, indices: Union[List[int], str, NoneType] = None, criteria: Optional[str] = None) -> 'DuckJanitor'
+select_rows(self, indices: Union[list[int], str, NoneType] = None, criteria: Optional[str] = None) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -1133,7 +1133,7 @@ Self for method chaining, with ``column`` replaced or
 Transform multiple columns using a function or SQL expression.
 
 ```python
-transform_columns(self, columns: Union[str, List[str]], func: Union[str, Callable], target_columns: Union[str, List[str], NoneType] = None) -> 'DuckJanitor'
+transform_columns(self, columns: Union[str, list[str]], func: Union[str, Callable], target_columns: Union[str, list[str], NoneType] = None) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -1171,7 +1171,7 @@ Self for method chaining, with the transformed columns.
 Bin a numeric column into discrete intervals.
 
 ```python
-bin_numeric(self, column: str, target_column: str, bins: Union[int, List[float]] = 5, strategy: str = 'quantile') -> 'DuckJanitor'
+bin_numeric(self, column: str, target_column: str, bins: Union[int, list[float]] = 5, strategy: str = 'quantile') -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -1237,7 +1237,7 @@ Self for method chaining, with ``column`` cast in place.
 Concatenate multiple columns into a single column.
 
 ```python
-concatenate_columns(self, columns: List[str], sep: str = '_', target_column: str = 'concatenated') -> 'DuckJanitor'
+concatenate_columns(self, columns: list[str], sep: str = '_', target_column: str = 'concatenated') -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -1269,7 +1269,7 @@ Self for method chaining, with ``target_column`` added.
 Split a column into multiple columns based on a delimiter.
 
 ```python
-deconcatenate_column(self, column: str, sep: str, target_columns: List[str]) -> 'DuckJanitor'
+deconcatenate_column(self, column: str, sep: str, target_columns: list[str]) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -1326,7 +1326,7 @@ Self for method chaining.
 Fill missing values in a column.
 
 ```python
-fill(self, column: str, value: Optional[Any] = None, direction: str = 'forward', group_by: Union[str, List[str], NoneType] = None) -> 'DuckJanitor'
+fill(self, column: str, value: Optional[Any] = None, direction: str = 'forward', group_by: Union[str, list[str], NoneType] = None) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -1428,7 +1428,7 @@ Self for method chaining, with empty strings replaced.
 Flag null values in specified columns with binary indicators.
 
 ```python
-flag_nulls(self, columns: Union[str, List[str], NoneType] = None, prefix: str = 'is_null_', present_value: Any = 1, absent_value: Any = 0) -> 'DuckJanitor'
+flag_nulls(self, columns: Union[str, list[str], NoneType] = None, prefix: str = 'is_null_', present_value: Any = 1, absent_value: Any = 0) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -1530,7 +1530,7 @@ Self for method chaining, with ``target_column`` added.
 Perform groupby aggregation.
 
 ```python
-groupby_agg(self, by: Union[str, List[str]], aggregations: Dict[str, Union[str, Dict]]) -> 'DuckJanitor'
+groupby_agg(self, by: Union[str, list[str]], aggregations: dict[str, typing.Union[str, dict]]) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -1563,7 +1563,7 @@ Self for method chaining, with the aggregated columns.
 Get top k rows within each group based on a column.
 
 ```python
-groupby_topk(self, by: Union[str, List[str]], column: str, k: int, ascending: bool = False) -> 'DuckJanitor'
+groupby_topk(self, by: Union[str, list[str]], column: str, k: int, ascending: bool = False) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -1597,7 +1597,7 @@ Self for method chaining, restricted to top-k rows per group.
 Create a column based on multiple conditions (SQL CASE WHEN).
 
 ```python
-case_when(self, conditions: List[tuple], target_column: str, default: Optional[Any] = None) -> 'DuckJanitor'
+case_when(self, conditions: list[tuple], target_column: str, default: Optional[Any] = None) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -2029,7 +2029,7 @@ Self for method chaining, with the truncated column.
 Pivot data from long to wide format.
 
 ```python
-pivot_wider(self, id_cols: Union[str, List[str]], name_col: str, value_col: str) -> 'DuckJanitor'
+pivot_wider(self, id_cols: Union[str, list[str]], name_col: str, value_col: str) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -2061,7 +2061,7 @@ Self for method chaining, in wide format.
 Pivot data from wide to long format.
 
 ```python
-pivot_longer(self, cols: Union[str, List[str]], names_to: str = 'variable', values_to: str = 'value') -> 'DuckJanitor'
+pivot_longer(self, cols: Union[str, list[str]], names_to: str = 'variable', values_to: str = 'value') -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -2095,7 +2095,7 @@ Self for method chaining, in long format.
 Perform conditional (non-equi) joins.
 
 ```python
-conditional_join(self, other: 'DuckJanitor', on: List[tuple], how: str = 'inner') -> 'DuckJanitor'
+conditional_join(self, other: 'DuckJanitor', on: list[tuple], how: str = 'inner') -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -2130,7 +2130,7 @@ Self for method chaining, with the conditional-join result.
 Return duplicate rows.
 
 ```python
-get_dupes(self, columns: Union[str, List[str], NoneType] = None) -> 'DuckJanitor'
+get_dupes(self, columns: Union[str, list[str], NoneType] = None) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -2160,7 +2160,7 @@ least one duplicate on ``columns``.
 Remove rows where values are NOT null (keep nulls).
 
 ```python
-dropnotnull(self, subset: Union[str, List[str], NoneType] = None, how: str = 'any') -> 'DuckJanitor'
+dropnotnull(self, subset: Union[str, list[str], NoneType] = None, how: str = 'any') -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -2224,7 +2224,7 @@ Self for method chaining, with one dummy column per token.
 Impute missing values.
 
 ```python
-impute(self, column: str, value: Optional[Any] = None, statistic: str = 'mean', group_by: Union[str, List[str], NoneType] = None) -> 'DuckJanitor'
+impute(self, column: str, value: Optional[Any] = None, statistic: str = 'mean', group_by: Union[str, list[str], NoneType] = None) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -2294,7 +2294,7 @@ Self for method chaining, with ``target_column`` added.
 Encode categorical columns with numerical labels.
 
 ```python
-label_encode(self, columns: Union[str, List[str]], suffix: str = '_encoded') -> 'DuckJanitor'
+label_encode(self, columns: Union[str, list[str]], suffix: str = '_encoded') -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -2325,7 +2325,7 @@ Self for method chaining, with the encoded columns.
 Find and replace values in a column.
 
 ```python
-find_replace(self, column: str, value_pairs: Dict[str, str], target_column: Optional[str] = None) -> 'DuckJanitor'
+find_replace(self, column: str, value_pairs: dict[str, str], target_column: Optional[str] = None) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -2387,7 +2387,7 @@ Self for method chaining, with ``dest_column`` appended.
 Expand relation to include all possible combinations of specified columns.
 
 ```python
-complete(self, columns: Union[str, List[str]], fill_value: Any = None) -> 'DuckJanitor'
+complete(self, columns: Union[str, list[str]], fill_value: Any = None) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -2656,7 +2656,7 @@ bool
 Perform join then apply Python function to each row.
 
 ```python
-join_apply(self, other: 'DuckJanitor', on: Union[str, List[str]], func: Callable, new_column_name: str) -> 'DuckJanitor'
+join_apply(self, other: 'DuckJanitor', on: Union[str, list[str]], func: Callable, new_column_name: str) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -2855,7 +2855,7 @@ Self for method chaining, restricted to ``names``.
 Return the current column names as a list (label-only).
 
 ```python
-get_index_labels(self) -> List[str]
+get_index_labels(self) -> list[str]
 ```
 
 **Returns**
@@ -2949,7 +2949,7 @@ Split ``column`` into multiple sub-fields (R: ``explode_index``).
 column called ``<column>_parsed`` is created.
 
 ```python
-explode_index(self, column: str, names: Optional[List[str]] = None, separator: str = '_') -> 'DuckJanitor'
+explode_index(self, column: str, names: Optional[list[str]] = None, separator: str = '_') -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -3020,7 +3020,7 @@ Cartesian-expand across the unique values of ``columns`` (R: ``expand``).
 ``on`` is unused for now; in R it controls the iteration order.
 
 ```python
-expand(self, columns: List[str], on=None) -> 'DuckJanitor'
+expand(self, columns: list[str], on=None) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -3084,7 +3084,7 @@ Self for method chaining, with the cross-joined columns.
 Group-by summarisation helper (R: ``summarise`` / ``summarize``).
 
 ```python
-summarise(self, group_by: Optional[List[str]] = None, agg_spec: Optional[dict] = None) -> 'DuckJanitor'
+summarise(self, group_by: Optional[list[str]] = None, agg_spec: Optional[dict] = None) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -3116,7 +3116,7 @@ Self for method chaining, with the aggregated columns appended.
 Long-form pivot driven by a column-name spec (R: ``pivot_longer_spec``).
 
 ```python
-pivot_longer_spec(self, id_cols: List[str], value_cols: List[str], names_to: str = 'name', values_to: str = 'value', names_sep: Optional[str] = None) -> 'DuckJanitor'
+pivot_longer_spec(self, id_cols: list[str], value_cols: list[str], names_to: str = 'name', values_to: str = 'value', names_sep: Optional[str] = None) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -3153,7 +3153,7 @@ Self for method chaining, in long format.
 Wide pivot driven by a column-name spec (R: ``pivot_wider_spec``).
 
 ```python
-pivot_wider_spec(self, id_cols: List[str], names_from: str, values_from: str, names_glue: str = '_') -> 'DuckJanitor'
+pivot_wider_spec(self, id_cols: list[str], names_from: str, values_from: str, names_glue: str = '_') -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -3568,7 +3568,7 @@ Self for method chaining, sorted naturally.
 Sort rows by an explicit string ordering of ``column`` (R: ``sort_column_value_order``).
 
 ```python
-sort_column_value_order(self, column: str, order: List[str]) -> 'DuckJanitor'
+sort_column_value_order(self, column: str, order: list[str]) -> 'DuckJanitor'
 ```
 
 **Parameters**
