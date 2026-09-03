@@ -23,9 +23,11 @@ from pyduck_janitor import DuckJanitor
 from pyduck_janitor.embeddings import (
     DEFAULT_EMBED_MODEL,
     EmbeddingsNotAvailable,
+    _canonical_model_id,
     _is_installed,
     _model_dir,
     cache_dir,
+    embed_column,
     embed_install,
     embed_list_installed,
     embed_remove,
@@ -83,6 +85,16 @@ class TestCacheManagement:
         assert (target / "model.safetensors").exists()
         assert _is_installed(fake_model_dir.name)
 
+    def test_hf_prefix_maps_to_same_cache_key(self, isolated_cache, fake_model_dir):
+        target = embed_install(str(fake_model_dir), allow_hf_fallback=False)
+        # Install under plain id equivalent to fake_model_dir.name.
+        plain = _canonical_model_id(fake_model_dir.name)
+        assert _is_installed(plain)
+        # hf: prefix should resolve to the same canonical path/check.
+        assert _is_installed(f"hf:{plain}")
+        assert _model_dir(plain) == _model_dir(f"hf:{plain}")
+        assert target == _model_dir(plain)
+
     def test_install_idempotent(self, isolated_cache, fake_model_dir):
         target1 = embed_install(str(fake_model_dir), allow_hf_fallback=False)
         target2 = embed_install(str(fake_model_dir), allow_hf_fallback=False)
@@ -137,6 +149,31 @@ class TestEmbedColumnErrors:
         assert "sentence-transformers" in str(exc_info.value) or \
                "Model" in str(exc_info.value)
         assert exc_info.value.install_command is not None
+
+    def test_embed_column_accepts_hf_prefixed_model(
+        self, isolated_cache, monkeypatch, fake_model_dir
+    ):
+        embed_install(str(fake_model_dir), allow_hf_fallback=False)
+        model_name = fake_model_dir.name
+
+        class _FakeEncoder:
+            def __init__(self, path):
+                self.path = path
+
+            def encode(self, texts, **kwargs):
+                assert kwargs["batch_size"] == 128
+                return [[0.1, 0.2] for _ in texts]
+
+        class _FakeST:
+            SentenceTransformer = _FakeEncoder
+
+        monkeypatch.setattr("pyduck_janitor.embeddings._get_st", lambda: _FakeST)
+
+        df = pd.DataFrame({"text": ["hello", "world"]})
+        dj = DuckJanitor.from_pandas(df)
+        out = embed_column(dj, "text", model=f"hf:{model_name}", batch_size=128).collect()
+        assert "embedding" in out.columns
+        assert len(out["embedding"]) == 2
 
 
 # ---------------------------------------------------------------------------

@@ -129,6 +129,16 @@ class TestTextNormalize:
         # Accents gone, lowercased, whitespace collapsed.
         assert out["name"].tolist() == ["cafe", "resume", "naive"]
 
+    def test_preserves_nulls(self, fresh_conn, icu_available):
+        if not icu_available:
+            pytest.skip("icu extension not available")
+        df = pd.DataFrame({"name": ["A", None, pd.NA]})
+        dj = DuckJanitor.from_pandas(df)
+        out = text_normalize(dj, "name").collect()
+        assert out.loc[0, "name"] == "a"
+        assert pd.isna(out.loc[1, "name"])
+        assert pd.isna(out.loc[2, "name"])
+
     def test_disable_lowercase(self, fresh_conn, icu_available):
         if not icu_available:
             pytest.skip("icu extension not available")
@@ -151,6 +161,15 @@ class TestTextNormalize:
         assert "name_clean" in out.columns
         assert out["name_clean"].tolist() == ["hello"]
 
+    def test_target_column_with_accent_strip(self, fresh_conn, icu_available):
+        if not icu_available:
+            pytest.skip("icu extension not available")
+        df = pd.DataFrame({"name": ["Café"]})
+        dj = DuckJanitor.from_pandas(df)
+        out = text_normalize(dj, "name", target_columns="name_clean").collect()
+        assert out["name"].tolist() == ["Café"]
+        assert out["name_clean"].tolist() == ["cafe"]
+
     def test_multiple_columns(self, fresh_conn, icu_available):
         if not icu_available:
             pytest.skip("icu extension not available")
@@ -171,6 +190,32 @@ class TestTextNormalize:
         dj = DuckJanitor.from_pandas(df)
         with pytest.raises(ValueError, match="form must be one of"):
             text_normalize(dj, "name", form="INVALID")
+
+    def test_form_nfkc_changes_compatibility_chars(self, fresh_conn, icu_available):
+        if not icu_available:
+            pytest.skip("icu extension not available")
+        df = pd.DataFrame({"name": ["ℌ𝔢𝔩𝔩𝔬 ﬁ"]})
+        dj = DuckJanitor.from_pandas(df)
+        out_nfc = text_normalize(
+            dj,
+            "name",
+            form="NFC",
+            strip_accents=False,
+            lower=False,
+            collapse_whitespace=False,
+            strip=False,
+        ).collect()
+        out_nfkc = text_normalize(
+            dj,
+            "name",
+            form="NFKC",
+            strip_accents=False,
+            lower=False,
+            collapse_whitespace=False,
+            strip=False,
+        ).collect()
+        assert out_nfc.loc[0, "name"] != out_nfkc.loc[0, "name"]
+        assert out_nfkc.loc[0, "name"] == "Hello fi"
 
     def test_mismatched_lengths_raise(self, fresh_conn, icu_available):
         if not icu_available:

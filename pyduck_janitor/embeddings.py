@@ -121,8 +121,17 @@ def _slugify(name: str) -> str:
     return name.replace("/", "__").replace("@", "_at_")
 
 
+def _canonical_model_id(model: str) -> str:
+    """Normalize a model identifier to its canonical cache key.
+
+    The ``hf:`` prefix is accepted at the API layer but is not part of
+    the local cache key.
+    """
+    return model[3:] if model.startswith("hf:") else model
+
+
 def _model_dir(model: str) -> Path:
-    return cache_dir() / _slugify(model)
+    return cache_dir() / _slugify(_canonical_model_id(model))
 
 
 def _is_installed(model: str) -> bool:
@@ -158,7 +167,9 @@ def _bundled_model_path(model: str) -> Optional[Path]:
     except ImportError:
         return None
     pkg_path = Path(pkg.__file__).resolve().parent
-    candidate = pkg_path / "data" / "embeddings" / _slugify(model)
+    candidate = pkg_path / "data" / "embeddings" / _slugify(
+        _canonical_model_id(model)
+    )
     if candidate.exists() and (candidate / "config.json").exists():
         return candidate
     return None
@@ -211,12 +222,13 @@ def embed_install(
         ready-to-run ``embed_install(...)`` command when possible.
     """
     with _lock:
-        if _is_installed(model):
-            return _model_dir(model)
+        canonical = _canonical_model_id(model)
+        if _is_installed(canonical):
+            return _model_dir(canonical)
 
         # Source 1: HuggingFace explicit
         if model.startswith("hf:"):
-            spec = model[3:]
+            spec = _canonical_model_id(model)
             return _install_from_hf(spec)
 
         # Source 2: local path
@@ -224,19 +236,19 @@ def embed_install(
             return _install_from_local(Path(model), cache=cache)
 
         # Source 3: bundled wheel
-        bundled = _bundled_model_path(model)
+        bundled = _bundled_model_path(canonical)
         if bundled is not None:
             return _install_from_local(bundled, cache=cache)
 
         # Source 4: HuggingFace fallback
         if allow_hf_fallback:
-            return _install_from_hf(model)
+            return _install_from_hf(canonical)
 
         raise EmbeddingsNotAvailable(
-            model,
-            f"No source for model '{model}': not in bundled wheel and "
+            canonical,
+            f"No source for model '{canonical}': not in bundled wheel and "
             "HuggingFace fallback disabled.",
-            install_command=f"pyduck_janitor.embed_install('{model}')",
+            install_command=f"pyduck_janitor.embed_install('{canonical}')",
         )
 
 
@@ -378,16 +390,22 @@ def _get_st():
         return _st_module
 
 
-def _encode_texts(texts: Sequence[str], model: str) -> list[list[float]]:
+def _encode_texts(
+    texts: Sequence[str], model: str, *, batch_size: int = 64
+) -> list[list[float]]:
     """Encode ``texts`` with ``model``. Returns a list of float lists."""
-    if not _is_installed(model):
-        embed_install(model)
+    canonical = _canonical_model_id(model)
+    if not _is_installed(canonical):
+        embed_install(canonical)
     st = _get_st()
-    encoder = st.SentenceTransformer(str(_model_dir(model)))
+    encoder = st.SentenceTransformer(str(_model_dir(canonical)))
     embeddings = encoder.encode(
-        list(texts), convert_to_numpy=True, show_progress_bar=False
+        list(texts),
+        batch_size=int(batch_size),
+        convert_to_numpy=True,
+        show_progress_bar=False,
     )
-    return embeddings.tolist()
+    return embeddings.tolist() if hasattr(embeddings, "tolist") else list(embeddings)
 
 
 # ---------------------------------------------------------------------------
@@ -430,16 +448,17 @@ def embed_column(
         If the model isn't installed and ``embed_install`` can't fetch it.
     """
     conn = dj._connection
-    if not _is_installed(model):
+    canonical = _canonical_model_id(model)
+    if not _is_installed(canonical):
         raise EmbeddingsNotAvailable(
-            model,
-            f"Model '{model}' is not in the local cache.",
-            install_command=f"pyduck_janitor.embed_install('{model}')",
+            canonical,
+            f"Model '{canonical}' is not in the local cache.",
+            install_command=f"pyduck_janitor.embed_install('{canonical}')",
         )
 
     df = dj.collect()
     texts = df[column].astype(str).tolist()
-    embeddings = _encode_texts(texts, model)
+    embeddings = _encode_texts(texts, canonical, batch_size=batch_size)
 
     # Register a temp table with original cols + new embedding column.
     table_name = _register_relation(conn, dj._relation)
@@ -584,7 +603,7 @@ def vector_search(
     _ensure_vss(conn)
 
     if isinstance(query, str):
-        embedding = _encode_texts([query], model)[0]
+        embedding = _encode_texts([query], _canonical_model_id(model))[0]
     else:
         embedding = list(query)
 

@@ -26,6 +26,7 @@ with the exact pip extra to install.
 from __future__ import annotations
 
 from typing import Iterable, Optional, Sequence, Union
+import unicodedata
 
 import duckdb
 import pandas as pd
@@ -116,16 +117,6 @@ def text_normalize(
 
     table_name = _register_relation(conn, dj._relation)
 
-    # Probe whether the icu extension exposes a normalizer; if not,
-    # we silently skip that step (the other transforms do most of
-    # the work, and the user can still chain icu-aware verbs).
-    has_icu_normalize = form != "NFC"
-    if has_icu_normalize:
-        try:
-            conn.execute(f"SELECT nfc_normalize('x', '{form}')")
-        except duckdb.Error:
-            has_icu_normalize = False
-
     if isinstance(columns, str):
         columns = [columns]
     else:
@@ -147,34 +138,34 @@ def text_normalize(
     if form not in {"NFC", "NFD", "NFKC", "NFKD"}:
         raise ValueError(f"form must be one of NFC/NFD/NFKC/NFKD, got {form!r}")
 
-    # When accent stripping is requested, we have to materialize the
-    # column and process it in Python. DuckDB's RE2 regex is byte-based
-    # and would mangle multi-byte UTF-8 sequences.
-    if strip_accents:
-        import unicodedata
-
-        def _strip_accents(s: str) -> str:
-            nfd = unicodedata.normalize("NFD", s)
-            return "".join(c for c in nfd if not unicodedata.combining(c))
+    # Non-NFC form normalization and accent stripping are done in Python
+    # to preserve Unicode semantics and NULL values.
+    sql_sources = list(columns)
+    if strip_accents or form != "NFC":
+        def _normalize_scalar(v: object) -> object:
+            if pd.isna(v):
+                return v
+            normalized = unicodedata.normalize(form, str(v))
+            if strip_accents:
+                normalized = "".join(
+                    c
+                    for c in unicodedata.normalize("NFD", normalized)
+                    if not unicodedata.combining(c)
+                )
+            return normalized
 
         df = dj.collect()
-        new_cols: dict[str, pd.Series] = {}
+        transformed = df.copy()
         for src, dst in zip(columns, target_columns):
-            new_cols[dst] = df[src].astype(str).map(_strip_accents)
-        # Other transforms still happen in DuckDB. We register the
-        # accent-stripped frame and continue.
-        for c in df.columns:
-            if c not in new_cols:
-                new_cols[c] = df[c]
-        accent_stripped = pd.DataFrame(new_cols)[df.columns.tolist()]
-        conn.register(f"_dj_textnorm_{table_name.strip('_').strip('\"')}",
-                      accent_stripped)
-        table_name = (
-            f"_dj_textnorm_{table_name.strip('_').strip('\"')}"
-        )
+            transformed[dst] = df[src].map(_normalize_scalar)
+
+        temp_name = f"_dj_textnorm_{table_name.strip('_').strip('\"')}"
+        conn.register(temp_name, transformed)
+        table_name = temp_name
+        sql_sources = list(target_columns)
 
     pieces: list[str] = []
-    for src, dst in zip(columns, target_columns):
+    for src, dst in zip(sql_sources, target_columns):
         # Build the expression by composing the transforms. Each
         # transform takes the previous expression and wraps it.
         expr: str = dj._quote(src)
@@ -188,19 +179,21 @@ def text_normalize(
         if strip:
             expr = f"trim({expr})"
 
-        if form != "NFC" and has_icu_normalize:
-            expr = f"nfc_normalize({expr})"
-
         pieces.append(f"{expr} AS {dj._quote(dst)}")
 
     # When the target column matches a source column, drop the
     # source from the projection so we overwrite instead of adding
     # name_1 alongside name.
-    overwriting = set(target_columns) & set(columns)
+    base_columns = (
+        list(dj._relation.columns)
+        if not (strip_accents or form != "NFC")
+        else list(transformed.columns)
+    )
+    replacing = set(target_columns)
     other_cols = [
         dj._quote(c)
-        for c in dj._relation.columns
-        if c not in overwriting
+        for c in base_columns
+        if c not in replacing
     ]
     prefix = ", ".join(other_cols) + ", " if other_cols else ""
     select_sql = (

@@ -130,6 +130,14 @@ def load_extension(
 
     pip_extra, duckdb_name = EXTENSIONS[name]
 
+    if _env_disabled():
+        raise ExtensionNotAvailable(
+            name,
+            f"Extension loading disabled by PYDUCK_SKIP_EXTENSIONS "
+            f"for '{duckdb_name}'.",
+            pip_extra=pip_extra,
+        )
+
     # Skip install if the user opts out (e.g. they manage extensions
     # via a custom DuckDB configuration or a Docker image).
     if install:
