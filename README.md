@@ -237,6 +237,41 @@ pyduck-janitor can work with data from:
 - **DuckDB databases** - Existing `.duckdb` files
 - **SQL queries** - Custom SQL as input
 
+## Text & Similarity (v0.2.0)
+
+Beyond structural cleaning, pyduck-janitor wraps three lazy-loaded DuckDB
+extensions — `icu`, `fts`, and `vss` — for messy-text work at scale:
+
+| Verb | Backend | What it does |
+|---|---|---|
+| `text_normalize()` | icu | Lowercase, accent strip, whitespace collapse |
+| `search_text()` | fts | BM25-ranked full-text search |
+| `keyword_filter()` | fts | Boolean contains (any/all phrases) |
+| `build_fts_index()` / `drop_fts_index()` | fts | Index lifecycle |
+| `embed_column()` | vss + sentence-transformers | Embed a text column |
+| `build_vector_index()` / `vector_search()` | vss | HNSW kNN search |
+| `fuzzy_dedupe()` | vss | Near-duplicate detection |
+| `embed_install()` / `embed_list_installed()` / `embed_remove()` | — | Model cache management |
+
+```python
+import pandas as pd
+from pyduck_janitor import DuckJanitor, build_fts_index, search_text, text_normalize
+
+df = pd.DataFrame({"text": ["The quick brown fox", "lazy dogs", "brown foxes"]})
+dj = DuckJanitor.from_pandas(df)
+dj = build_fts_index(dj, "text")
+
+results = search_text(dj, "text", "fox quick", top_k=3)
+#    __pyduck_rowid  text                       score
+# 0               3  brown foxes                0.34
+# 1               1  The quick brown fox         0.28
+```
+
+Embedding models are never downloaded silently — `embed_install()` is the
+explicit opt-in, and supports the bundled companion wheel (offline), any
+HuggingFace model (`hf:org/model`), or a local path. Full guide:
+[`docs/text_ops.md`](docs/text_ops.md).
+
 ## Key Features
 
 ### Lazy Evaluation

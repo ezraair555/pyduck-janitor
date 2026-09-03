@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pyduck-janitor"
 version = "0.2.0"
-description = "DuckDB-backed pyjanitor for high-performance data cleaning on large datasets"
+description = "DuckDB-backed pyjanitor for high-performance data cleaning, text search, and vector similarity on large datasets"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
@@ -38,11 +38,25 @@ dev = [
     "mypy>=0.950",
     "ruff>=0.6.0",
 ]
+vss = [
+    "sentence-transformers>=2.2",
+    "huggingface_hub>=0.20",
+]
+embeddings = [
+    # Bundled weights via the companion wheel (offline install path).
+    "pyduck-janitor-embeddings>=0.1",
+    "sentence-transformers>=2.2",
+    "huggingface_hub>=0.20",
+]
+text = [
+    # icu + fts ship with the DuckDB Python wheel; this extra is a
+    # no-op placeholder kept for install-command stability.
+]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/pyduck-janitor"
-Documentation = "https://pyduck-janitor.readthedocs.io"
-Repository = "https://github.com/yourusername/pyduck-janitor"
+Homepage = "https://github.com/ezraair555/pyduck-janitor"
+Documentation = "https://github.com/ezraair555/pyduck-janitor/tree/main/docs"
+Repository = "https://github.com/ezraair555/pyduck-janitor"
 
 [tool.setuptools.packages.find]
 where = ["."]

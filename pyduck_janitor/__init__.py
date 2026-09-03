@@ -63,8 +63,28 @@ from .cleaning_ops_final import (
     process_text,
 )
 from .duck_janitor import DropLabel, DuckJanitor, patterns
+from .extensions import ExtensionNotAvailable
+from .text_ops import (
+    build_fts_index,
+    drop_fts_index,
+    keyword_filter,
+    search_text,
+    text_normalize,
+)
+from .embeddings import (
+    DEFAULT_EMBED_MODEL,
+    EmbeddingsNotAvailable,
+    build_vector_index,
+    cache_dir,
+    embed_column,
+    embed_install,
+    embed_list_installed,
+    embed_remove,
+    fuzzy_dedupe,
+    vector_search,
+)
 
-__version__ = "0.1.3"
+__version__ = "0.2.0"
 __author__ = "EzraAir555"
 __all__ = [
     "DuckJanitor",
@@ -122,4 +142,26 @@ __all__ = [
     # pyjanitor helper surface (non-chained-verb)
     "DropLabel",
     "patterns",
+]
+
+
+# Append new exports to __all__
+__all__ = __all__ + [
+    # Text + similarity extensions (icu / fts / vss)
+    "ExtensionNotAvailable",
+    "EmbeddingsNotAvailable",
+    "DEFAULT_EMBED_MODEL",
+    "text_normalize",
+    "build_fts_index",
+    "drop_fts_index",
+    "search_text",
+    "keyword_filter",
+    "embed_install",
+    "embed_list_installed",
+    "embed_remove",
+    "cache_dir",
+    "embed_column",
+    "build_vector_index",
+    "vector_search",
+    "fuzzy_dedupe",
 ]

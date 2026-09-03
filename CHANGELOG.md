@@ -2,9 +2,43 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.2.0 - 2026-08-31
+## 0.2.0 - 2026-09-02 (unreleased; was 2026-08-31)
 
 ### Added
+- **Text & similarity verb families** backed by three lazy-loaded DuckDB
+  extensions (`icu`, `fts`, `vss`) — new module `pyduck_janitor/text_ops.py`:
+  - `text_normalize` — lowercase, accent strip (Python `unicodedata` NFD +
+    combining-mark filter), whitespace collapse, optional Unicode form.
+  - `build_fts_index` / `drop_fts_index` / `search_text` / `keyword_filter` —
+    BM25-ranked full-text search with stemmer + stopword options.
+- **Embedding model management + vector search** — new module
+  `pyduck_janitor/embeddings.py`:
+  - `embed_install` — three source modes: bundled companion wheel,
+    HuggingFace (`hf:org/model[@rev]`, honors `HF_TOKEN`), or local path.
+    Idempotent; never auto-downloads.
+  - `embed_list_installed` / `embed_remove` — cache inspection + cleanup
+    (`~/.cache/pyduck-janitor/embeddings/`, override via `PYDUCK_EMBED_CACHE`).
+  - `embed_column` — sentence-transformers embeddings as a FLOAT[N] column.
+  - `build_vector_index` / `vector_search` — HNSW index (cosine/ip/l2sq)
+    + kNN search with optional distance threshold.
+  - `fuzzy_dedupe` — near-duplicate detection via embedding cosine
+    distance with union-find grouping.
+- **Extension management** — new module `pyduck_janitor/extensions.py`:
+  per-connection lazy `INSTALL`/`LOAD` with idempotent caching and typed
+  `ExtensionNotAvailable` errors that name the pip extra to install.
+  Set `PYDUCK_SKIP_EXTENSIONS=1` in locked-down environments.
+- **Typed error surface**: `ExtensionNotAvailable`, `EmbeddingsNotAvailable`
+  (both carry actionable install hints; no silent network calls).
+- **Companion wheel** `pyduck-janitor-embeddings` (separate package):
+  bundles `all-MiniLM-L6-v2` weights so `embed_install()` works offline
+  after `pip install pyduck-janitor[embeddings]`.
+- New extras: `[vss]` (sentence-transformers + hub), `[embeddings]`
+  (companion wheel + vss deps), `[text]` (no-op placeholder).
+- 33 new tests (`tests/test_text_ops.py`, `tests/test_embeddings.py`);
+  full suite 317 passing.
+- New docs: `docs/text_ops.md` covering all verb families, install
+  modes, and a decision table.
+
 - **100% pyjanitor API parity** — 94/94 of the functions documented on the pyjanitor API reference are now covered, verified by a fresh scan of pyjanitor's live docs. Parity analysis: `REVIEW_PYJANITOR_PARITY.md`.
 - ~35 newly added chainable methods on `DuckJanitor` (all ports of pyjanitor functions — same names except where noted as aliases):
   - Date conversions: `convert_unix_date`, `convert_excel_date`, `convert_matlab_date`, `excel_time_to_numeric`, `sas_numeric_to_date`, `to_datetime` (float-safe via `TO_TIMESTAMP`), plus `convert_to_date`/`convert_to_datetime` aliases.
