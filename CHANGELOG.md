@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.1 - 2026-09-04
+
+### Added
+- Added `DuckJanitor.from_database()` for loading query results from open
+  DB-API 2.0 connections, including Vertica and Microsoft SQL Server drivers.
+- Added parameter binding, optional pandas query arguments, and chunked-read
+  support while preserving the caller's connection lifecycle.
+- Added regression coverage and documentation for external database loading.
+
 ## 0.2.0 - 2026-09-03
 
 ### Added
