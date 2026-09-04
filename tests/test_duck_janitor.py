@@ -962,13 +962,9 @@ class TestDuckJanitor:
         """from_database should support DB-API connections and parameters."""
         connection = sqlite3.connect(":memory:")
         connection.execute("CREATE TABLE people (name TEXT, age INTEGER)")
-        connection.executemany(
-            "INSERT INTO people VALUES (?, ?)", [("Ada", 36), ("Lin", 29)]
-        )
+        connection.executemany("INSERT INTO people VALUES (?, ?)", [("Ada", 36), ("Lin", 29)])
 
-        dj = DuckJanitor.from_database(
-            connection, "SELECT * FROM people WHERE age > ?", [30]
-        )
+        dj = DuckJanitor.from_database(connection, "SELECT * FROM people WHERE age > ?", [30])
 
         assert dj.collect().to_dict("records") == [{"name": "Ada", "age": 36}]
 
