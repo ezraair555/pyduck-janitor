@@ -382,6 +382,73 @@ class DuckJanitor:
         return cls.from_pandas(df)
 
     @classmethod
+    def from_database(
+        cls,
+        connection: Any,
+        query: str,
+        params: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> "DuckJanitor":
+        """Create a DuckJanitor from a query on an external database.
+
+        The connection may be any DB-API 2.0 connection accepted by
+        ``pandas.read_sql_query``. This includes ``vertica_python``
+        connections and ``pyodbc`` connections for Microsoft SQL Server.
+        The database driver remains an optional application dependency.
+
+        Parameters
+        ----------
+        connection : object
+            An open DB-API 2.0 connection, such as a Vertica or pyodbc
+            connection. The connection is not closed by this method.
+        query : str
+            SQL query to execute on the external database. Keep the query
+            in the source database's SQL dialect.
+        params : object, optional
+            Parameters passed unchanged to the database driver. Use the
+            placeholder style required by that driver (for example ``?``
+            for pyodbc or ``%s`` for many DB-API drivers).
+        **kwargs
+            Additional arguments forwarded to ``pandas.read_sql_query``
+            (for example ``parse_dates`` or ``dtype``).
+
+        Returns
+        -------
+        DuckJanitor
+            A DuckJanitor instance backed by a DuckDB relation containing
+            the query result.
+
+        Examples
+        --------
+        >>> import sqlite3
+        >>> db = sqlite3.connect(':memory:')
+        >>> _ = db.execute('CREATE TABLE people (name TEXT, age INTEGER)')
+        >>> _ = db.executemany('INSERT INTO people VALUES (?, ?)', [('Ada', 36), ('Lin', 29)])
+        >>> dj = DuckJanitor.from_database(db, 'SELECT * FROM people WHERE age > ?', [30])
+        >>> dj.collect()['name'].tolist()
+        ['Ada']
+
+        Notes
+        -----
+        The query result is materialized in pandas before it is registered
+        with DuckDB. For very large extracts, filter and aggregate in the
+        source query first, or use a source-specific connector in a future
+        extension.
+        """
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("query must be a non-empty SQL string")
+
+        read_kwargs = dict(kwargs)
+        if params is not None:
+            read_kwargs["params"] = params
+        result = pd.read_sql_query(query, connection, **read_kwargs)
+        if isinstance(result, pd.DataFrame):
+            df = result
+        else:
+            df = pd.concat(result, ignore_index=True)
+        return cls.from_pandas(df)
+
+    @classmethod
     def from_sql(
         cls, query: str, connection: Optional[duckdb.DuckDBPyConnection] = None
     ) -> "DuckJanitor":

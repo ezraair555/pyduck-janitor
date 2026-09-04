@@ -2,6 +2,8 @@
 Tests for DuckJanitor class.
 """
 
+import sqlite3
+
 import pandas as pd
 import pytest
 from pyduck_janitor import DuckJanitor
@@ -955,3 +957,24 @@ class TestDuckJanitor:
         """from_sql should initialize DuckJanitor directly from a SQL query."""
         dj = DuckJanitor.from_sql("SELECT 42 AS answer")
         assert dj.collect()["answer"].iloc[0] == 42
+
+    def test_from_database_with_dbapi_connection_and_params(self):
+        """from_database should support DB-API connections and parameters."""
+        connection = sqlite3.connect(":memory:")
+        connection.execute("CREATE TABLE people (name TEXT, age INTEGER)")
+        connection.executemany(
+            "INSERT INTO people VALUES (?, ?)", [("Ada", 36), ("Lin", 29)]
+        )
+
+        dj = DuckJanitor.from_database(
+            connection, "SELECT * FROM people WHERE age > ?", [30]
+        )
+
+        assert dj.collect().to_dict("records") == [{"name": "Ada", "age": 36}]
+
+    def test_from_database_rejects_empty_query(self):
+        """from_database should fail early for an empty query."""
+        connection = sqlite3.connect(":memory:")
+
+        with pytest.raises(ValueError, match="non-empty SQL string"):
+            DuckJanitor.from_database(connection, "   ")

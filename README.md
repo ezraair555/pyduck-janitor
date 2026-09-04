@@ -217,7 +217,7 @@ These were added in v0.2.0 to reach 100% coverage of pyjanitor's documented API.
 
 These are the only truly *new* methods (no pyjanitor counterpart) — they exist because the backend is a live DuckDB connection rather than a pandas DataFrame:
 
-- [`from_pandas()`](docs/api/functions.md#from_pandas), [`from_csv()`](docs/api/functions.md#from_csv), [`from_excel()`](docs/api/functions.md#from_excel), [`from_json()`](docs/api/functions.md#from_json), [`from_parquet()`](docs/api/functions.md#from_parquet), [`from_sql()`](docs/api/functions.md#from_sql) - Data source loaders
+- [`from_pandas()`](docs/api/functions.md#from_pandas), [`from_csv()`](docs/api/functions.md#from_csv), [`from_excel()`](docs/api/functions.md#from_excel), [`from_json()`](docs/api/functions.md#from_json), [`from_parquet()`](docs/api/functions.md#from_parquet), [`from_database()`](docs/api/functions.md#from_database), [`from_sql()`](docs/api/functions.md#from_sql) - Data source loaders
 - [`sql()`](docs/api/functions.md#sql) - Escape hatch: raw SQL against the current relation (use `self` as the table name)
 - [`explain()`](docs/api/functions.md#explain) - EXPLAIN plan for the current pipeline
 - [`collect()`](docs/api/functions.md#collect) / [`head()`](docs/api/functions.md#head) - Materialize to pandas / preview rows
@@ -235,6 +235,47 @@ pyduck-janitor can work with data from:
 - **JSON files** - Local or remote
 - **DuckDB databases** - Existing `.duckdb` files
 - **SQL queries** - Custom SQL as input
+- **External SQL databases** - Any open DB-API 2.0 connection, including Vertica and Microsoft SQL Server
+
+### External database connections
+
+`from_database()` accepts an already-open database connection and executes a
+source-database query before bringing the result into DuckDB. Install the
+driver for the system you use; drivers are intentionally not required by the
+base package.
+
+```python
+# Vertica: pip install vertica-python
+import vertica_python
+
+with vertica_python.connect(host="vertica.example.com", database="analytics",
+                            user="analyst", password="...") as connection:
+    dj = DuckJanitor.from_database(
+        connection,
+        "SELECT employee_id, department, salary FROM employees "
+        "WHERE snapshot_date >= %s",
+        ["2026-01-01"],
+    )
+    result = dj.clean_names().collect()
+```
+
+```python
+# Microsoft SQL Server: pip install pyodbc
+import pyodbc
+
+connection = pyodbc.connect("DRIVER={ODBC Driver 18 for SQL Server};SERVER=...;")
+dj = DuckJanitor.from_database(
+    connection,
+    "SELECT employee_id, department, salary FROM dbo.employees WHERE department = ?",
+    ["Finance"],
+)
+result = dj.collect()
+```
+
+The query runs in the source database using its SQL dialect and parameter
+style. Returned rows are materialized into DuckDB, so existing `DuckJanitor`
+transformations can be chained afterward. `from_database()` does not close
+the connection; the caller owns its lifecycle.
 
 ## Text & Similarity (v0.2.0)
 
