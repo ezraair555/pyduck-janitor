@@ -76,7 +76,7 @@ This project follows [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 Four jobs run on every PR:
 
 - **`lint`** — `ruff check` + `ruff format --check` on `pyduck_janitor/`, `scripts/`, `tests/`. Run locally with `ruff check . && ruff format --check .`. This job is **blocking** (failures prevent merge) — pre-existing style issues were cleared on 2026-09-01.
-- **`test`** — pytest on Python 3.9, 3.10, 3.11, 3.12 with DuckDB and pandas pinned to known-good versions. Stops on first failure with full traceback; on failure the log is uploaded as an artifact.
+- **`test`** — pytest on Python 3.10, 3.11, 3.12 with DuckDB 1.5.5 and pandas pinned to known-good versions. Stops on first failure with full traceback; on failure the log is uploaded as an artifact.
 - **`agent-contract`** — executes every generated API example, verifies the public `DuckJanitor` method contract, and uploads the structured agent review as an artifact.
 - **`review-agent`** — Runs `scripts/ci_review.py` and posts a comment on the PR with:
   1. **Module map** — every public symbol with its one-line docstring

@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.6 - 2026-09-04
+
+### Changed
+- Standardized the supported runtime on Python 3.10+ and DuckDB
+  `>=1.5.5,<1.6` so core functionality and optional extensions share one
+  tested compatibility family.
+- Updated CI, package metadata, contributor guidance, and agent guidance to
+  use DuckDB 1.5.5 consistently.
+
 ## 0.2.5 - 2026-09-04
 
 ### Fixed

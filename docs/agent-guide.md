@@ -65,7 +65,11 @@ python -m pip install "pyduck-janitor[graph,diff]"
 The extra does not silently download native binaries. Use
 `auto_install=True` only when runtime network access and extension download
 are explicitly permitted. Onager and `duck_diff` require a matching DuckDB
-minor version; the supported extension CI target is DuckDB 1.5.5.
+minor version; the supported package and extension target is DuckDB 1.5.5.
+
+The supported runtime is Python 3.10 or newer. The package deliberately pins
+the DuckDB major/minor family to `>=1.5.5,<1.6` so core APIs and optional
+community extensions share one tested runtime.
 
 ## Agent safety and compatibility
 

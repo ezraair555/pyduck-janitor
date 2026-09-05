@@ -37,5 +37,6 @@ ruff format --check pyduck_janitor scripts tests
 git diff --check
 ```
 
-Optional DuckDB community extensions require a matching DuckDB minor version;
-test them separately from the core matrix.
+The supported runtime is Python 3.10+ with DuckDB `>=1.5.5,<1.6`. Keep core
+and optional-extension CI on that same DuckDB family so binary extensions do
+not drift from the package runtime.

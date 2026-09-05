@@ -37,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python ${{ matrix.python-version }}
@@ -53,11 +53,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-          if [ "${{ matrix.python-version }}" = "3.9" ]; then
-            pip install "duckdb==1.4.3" "pandas==2.1.4"
-          else
-            pip install "duckdb==1.5.2" "pandas==2.1.4"
-          fi
+          pip install "duckdb==1.5.5" "pandas==2.1.4"
       - name: Test
         # -x = stop on first failure (faster feedback for agents)
         # -v  = verbose so an agent can map failures back to specific tests
@@ -88,7 +84,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-          pip install "duckdb==1.5.2" "pandas==2.1.4"
+          pip install "duckdb==1.5.5" "pandas==2.1.4"
       - name: Verify generated API examples
         run: python scripts/generate_api_docs.py --check
       - name: Verify agent review output
