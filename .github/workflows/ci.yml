@@ -37,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python ${{ matrix.python-version }}
@@ -68,6 +68,47 @@ jobs:
           name: pytest-log-${{ matrix.python-version }}
           path: artifacts/pytest.log
           if-no-files-found: error
+
+  agent-contract:
+    name: Agent and documentation contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: pyproject.toml
+      - name: Install package and tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install "duckdb==1.5.2" "pandas==2.1.4"
+      - name: Verify generated API examples
+        run: python scripts/generate_api_docs.py --check
+      - name: Verify agent review output
+        run: python scripts/ci_review.py --dry-run > agent-review.md
+      - name: Verify public package contract
+        run: |
+          python - <<'PY'
+          import importlib.metadata
+          from pyduck_janitor import DuckJanitor
+
+          required = (
+              "from_database", "metric_from_database", "metrics", "profile",
+              "metric_cube", "rate_metrics", "cohort_metrics", "freshness",
+              "reconcile", "asof_join", "window_mutate", "recursive_cte",
+          )
+          missing = [name for name in required if not hasattr(DuckJanitor, name)]
+          assert not missing, missing
+          assert importlib.metadata.version("pyduck-janitor")
+          PY
+      - name: Upload agent review artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-review
+          path: agent-review.md
 
   extension-smoke:
     name: DuckDB extension smoke test

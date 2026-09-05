@@ -159,7 +159,8 @@ def text_normalize(
         for src, dst in zip(columns, target_columns):
             transformed[dst] = df[src].map(_normalize_scalar)
 
-        temp_name = f"_dj_textnorm_{table_name.strip('_').strip('\"')}"
+        table_key = table_name.strip("_").strip('"')
+        temp_name = f"_dj_textnorm_{table_key}"
         conn.register(temp_name, transformed)
         table_name = temp_name
         sql_sources = list(target_columns)
@@ -268,7 +269,8 @@ def build_fts_index(
     # Materialize the relation as a TEMP table so FTS has a stable
     # target (FTS refuses to index views / arbitrary relations).
     table_name = _register_relation(conn, dj._relation)
-    material_name = f"_dj_fts_material_{table_name.strip('_').strip('\"')}"
+    table_key = table_name.strip("_").strip('"')
+    material_name = f"_dj_fts_material_{table_key}"
     if rowid_col is None:
         rowid_col = "__pyduck_rowid"
     conn.execute(
@@ -379,7 +381,7 @@ def search_text(
     material_table = getattr(dj, "_fts_table", None)
     if material_table is None:
         raise ValueError(
-            "No FTS material table recorded on this DuckJanitor. " "Call build_fts_index() first."
+            "No FTS material table recorded on this DuckJanitor. Call build_fts_index() first."
         )
 
     # Escape single quotes in the query (DuckDB string literal).
@@ -389,7 +391,7 @@ def search_text(
     select_cols = "*"
     if score_col is not None:
         select_cols = f"*, {bm25} AS {dj._quote(score_col)}"
-    sql = f"SELECT {select_cols} FROM {material_table} " f"WHERE {bm25} IS NOT NULL"
+    sql = f"SELECT {select_cols} FROM {material_table} WHERE {bm25} IS NOT NULL"
     if threshold is not None:
         sql += f" AND {bm25} >= {threshold}"
     sql += f" ORDER BY {bm25} DESC"

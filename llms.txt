@@ -1,0 +1,29 @@
+# pyduck-janitor
+
+> DuckDB-backed pyjanitor for lazy data cleaning, database metrics, temporal
+> analysis, graph workflows, and snapshot comparison.
+
+## Documentation
+
+- [README](README.md): installation, quickstart, and capability overview
+- [Agent Guide](docs/agent-guide.md): API map, workflows, and boundaries
+- [API Reference](docs/api/functions.md): signatures and runnable examples
+- [Changelog](CHANGELOG.md): release history and compatibility notes
+- [Contributing](CONTRIBUTING.md): development and validation workflow
+
+## Source map
+
+- `pyduck_janitor/duck_janitor.py`: core relation wrapper and public methods
+- `pyduck_janitor/cleaning_ops.py`: core cleaning verbs
+- `pyduck_janitor/cleaning_ops_extended.py`: extended cleaning/reshape verbs
+- `pyduck_janitor/embeddings.py`: optional vector helpers
+- `pyduck_janitor/text_ops.py`: text and full-text-search helpers
+- `pyduck_janitor/extensions.py`: lazy DuckDB extension loading
+- `scripts/generate_api_docs.py`: executable API documentation generator
+- `tests/`: regression and extension tests
+
+## Key public APIs
+
+`from_database`, `metric_from_database`, `metrics`, `profile`, `metric_cube`,
+`rate_metrics`, `cohort_metrics`, `freshness`, `reconcile`, `asof_join`,
+`window_mutate`, `recursive_cte`, `graph_analyze`, `diff`, and `sql`.

@@ -6,6 +6,9 @@
 
 **DuckDB-backed pyjanitor for high-performance data cleaning on large datasets**
 
+For AI agents and code assistants, start with the [Agent Guide](docs/agent-guide.md),
+the [API reference](docs/api/functions.md), and [`llms.txt`](llms.txt).
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Status: pre-release](https://img.shields.io/badge/status-pre--release-orange.svg)](https://github.com/ezraair555/pyduck-janitor)
 

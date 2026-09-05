@@ -98,7 +98,7 @@ class EmbeddingsNotAvailable(RuntimeError):
         self.cause = cause
         hint = ""
         if install_command:
-            hint = f"\n\nHint: install the model with:\n" f"    {install_command}"
+            hint = f"\n\nHint: install the model with:\n    {install_command}"
         super().__init__(message + hint)
 
 
@@ -250,7 +250,7 @@ def _install_from_hf(spec: str) -> Path:
     except ImportError as exc:
         raise EmbeddingsNotAvailable(
             spec,
-            "sentence-transformers is not installed; required for HuggingFace " "model downloads.",
+            "sentence-transformers is not installed; required for HuggingFace model downloads.",
             install_command="pip install pyduck-janitor[vss]",
             cause=exc,
         ) from exc
@@ -368,7 +368,7 @@ def _get_st():
         except ImportError as exc:
             raise EmbeddingsNotAvailable(
                 DEFAULT_EMBED_MODEL,
-                "sentence-transformers is not installed. Required for embedding " "operations.",
+                "sentence-transformers is not installed. Required for embedding operations.",
                 install_command="pip install pyduck-janitor[vss]",
                 cause=exc,
             ) from exc
@@ -449,7 +449,8 @@ def embed_column(
     # Register a temp table with original cols + new embedding column.
     table_name = _register_relation(conn, dj._relation)
     embed_df = pd.DataFrame({target_column: [list(map(float, e)) for e in embeddings]})
-    embed_table = f"_dj_embed_{table_name.strip('_').strip('\"')}"
+    table_key = table_name.strip("_").strip('"')
+    embed_table = f"_dj_embed_{table_key}"
     # We embed on the original df, so row order matches. Register
     # the embed table alongside the original.
     embed_full = pd.concat(
@@ -503,7 +504,8 @@ def build_vector_index(
 
     table_name = _register_relation(conn, dj._relation)
     if index_name is None:
-        index_name = f"hnsw_{table_name.strip('_').strip('\"')}"
+        table_key = table_name.strip("_").strip('"')
+        index_name = f"hnsw_{table_key}"
 
     # Infer dimension if not supplied.
     if dim is None:
@@ -518,7 +520,8 @@ def build_vector_index(
 
     # Materialize as a base table. HNSW indexes can't be created
     # on a registered relation — only on real base tables.
-    base_name = f"_dj_vss_base_{table_name.strip('_').strip('\"')}"
+    table_key = table_name.strip("_").strip('"')
+    base_name = f"_dj_vss_base_{table_key}"
     conn.execute(
         f"CREATE OR REPLACE TABLE {dj._quote(base_name)} AS "
         f"SELECT CAST({dj._quote(embedding_column)} AS FLOAT[{int(dim)}]) AS "
