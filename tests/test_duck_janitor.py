@@ -74,6 +74,85 @@ class TestDuckJanitor:
         with pytest.raises(ValueError, match="Unknown graph algorithms"):
             dj.graph_analyze("source", "target", "not_an_algorithm")
 
+    def test_validate_keys_and_deduplicate(self):
+        dj = DuckJanitor.from_pandas(
+            pd.DataFrame({"id": [1, 1, 2], "as_of": [2, 1, 1], "value": [20, 10, 30]})
+        )
+
+        assert dj.validate_keys("id", unique=False) is dj
+        result = dj.deduplicate("id", order_by="as_of").collect()
+        assert result.sort_values("id")["value"].tolist() == [10, 30]
+
+        with pytest.raises(ValueError, match="duplicate"):
+            dj.validate_keys("id")
+
+    def test_filter_noise_and_hierarchy_edges(self):
+        dj = DuckJanitor.from_pandas(
+            pd.DataFrame(
+                {
+                    "employee": [1, 2, 3, 999],
+                    "manager": [None, 1, 1, 999],
+                    "event": ["real", "real", "real", "test"],
+                }
+            )
+        )
+        filtered = dj.filter_noise(id_col="employee", exclude_ids=[999])
+        assert filtered.collect()["employee"].tolist() == [1, 2, 3]
+        edges = filtered.hierarchy_edges("employee", "manager").collect()
+        assert edges.sort_values("source").to_dict("records") == [
+            {"source": 2, "target": 1.0},
+            {"source": 3, "target": 1.0},
+        ]
+
+    def test_time_slice_event_window_and_change_detection(self):
+        dj = DuckJanitor.from_pandas(
+            pd.DataFrame(
+                {
+                    "id": [1, 1, 1],
+                    "event_date": pd.to_datetime(["2024-01-01", "2024-01-10", "2024-02-01"]),
+                    "department": ["A", "B", "B"],
+                }
+            )
+        )
+        assert len(dj.time_slice("event_date", start="2024-01-02", end="2024-01-31").collect()) == 1
+        assert (
+            len(
+                dj.event_window(
+                    "event_date", "2024-01-10", pre_window="2 days", post_window="2 days"
+                ).collect()
+            )
+            == 1
+        )
+        changes = dj.change_detection("id", "event_date", columns=["department"]).collect()
+        assert changes["is_changed"].tolist() == [False, True, False]
+        assert changes.loc[1, "changed_columns"] == "department"
+
+    def test_network_evolution_adds_periods_and_deltas(self, monkeypatch):
+        dj = DuckJanitor.from_pandas(
+            pd.DataFrame(
+                {
+                    "event_date": pd.to_datetime(["2024-01-01", "2024-02-01"]),
+                    "source": [1, 1],
+                    "target": [2, 2],
+                }
+            )
+        )
+
+        def fake_graph_analyze(self, source, target, algorithms, **kwargs):
+            return {
+                "pagerank": DuckJanitor(
+                    self._connection.sql("SELECT 1 AS node_id, 0.5 AS score"),
+                    self._connection,
+                )
+            }
+
+        monkeypatch.setattr(DuckJanitor, "graph_analyze", fake_graph_analyze)
+        result = dj.network_evolution("event_date", "source", "target", "pagerank")
+        output = result["pagerank"].collect()
+        assert len(output) == 2
+        assert output["metric_delta"].isna().sum() == 1
+        assert output["metric_delta"].fillna(0).tolist() == [0.0, 0.0]
+
     def test_diff_builds_duck_diff_query(self, monkeypatch):
         conn = duckdb.connect()
         conn.execute(
@@ -1153,3 +1232,69 @@ class TestDuckJanitor:
             DuckJanitor.from_pandas(sample_data).recursive_cte(
                 "tree; DROP TABLE users", "SELECT * FROM self", "SELECT * FROM tree"
             )
+
+    def test_database_metrics_profile_and_rates(self):
+        dj = DuckJanitor.from_pandas(
+            pd.DataFrame(
+                {
+                    "group": ["A", "A", "B"],
+                    "id": [1, 2, 3],
+                    "amount": [10.0, 20.0, 40.0],
+                    "success": [1, 0, 1],
+                }
+            )
+        )
+        metrics = dj.metrics(
+            {"n": ("*", "count"), "total": ("amount", "sum")}, group_by="group"
+        ).collect()
+        assert metrics.sort_values("group")["n"].tolist() == [2, 1]
+        assert metrics.sort_values("group")["total"].tolist() == [30.0, 40.0]
+        rates = dj.rate_metrics(
+            {"success_rate": ("SUM(success)", "COUNT(*)")}, group_by="group"
+        ).collect()
+        assert rates.sort_values("group")["success_rate"].tolist() == [0.5, 1.0]
+        profile = dj.profile().collect()
+        assert set(profile["column_name"]) == {"group", "id", "amount", "success"}
+        assert profile.loc[profile["column_name"] == "amount", "null_count"].iloc[0] == 0
+
+    def test_metric_cube_cohort_freshness_and_reconcile(self):
+        events = DuckJanitor.from_pandas(
+            pd.DataFrame(
+                {
+                    "year": [2024, 2024, 2025],
+                    "department": ["A", "A", "B"],
+                    "region": ["East", "West", "East"],
+                    "amount": [10, 20, 30],
+                    "entity": [1, 1, 2],
+                    "event_date": pd.to_datetime(["2024-01-01", "2024-02-01", "2024-01-01"]),
+                }
+            )
+        )
+        cube = events.metric_cube(
+            ["year", "department", "region"],
+            {"revenue": "SUM(amount)"},
+            totals="rollup",
+        ).collect()
+        assert cube["is_grand_total"].any()
+        assert cube.loc[cube["is_grand_total"], "revenue"].iloc[0] == 60
+        cohorts = events.cohort_metrics("entity", "event_date").collect()
+        assert {"cohort_size", "active_entities", "retention_rate"}.issubset(cohorts.columns)
+        freshness = events.freshness("event_date", stale_after="365 days").collect()
+        assert freshness["row_count"].iloc[0] == 3
+        other = DuckJanitor.from_pandas(pd.DataFrame({"entity": [1, 3]}))
+        reconciliation = events.reconcile(other, "entity").collect()
+        assert reconciliation["matched_keys"].iloc[0] == 1
+
+    def test_metric_from_database_pushes_aggregation(self):
+        import sqlite3
+
+        connection = sqlite3.connect(":memory:")
+        connection.execute("CREATE TABLE values_table (group_name TEXT, amount INTEGER)")
+        connection.executemany("INSERT INTO values_table VALUES (?, ?)", [("A", 1), ("A", 2)])
+        result = DuckJanitor.metric_from_database(
+            connection,
+            "SELECT group_name, amount FROM values_table",
+            {"total": ("amount", "sum")},
+            group_by="group_name",
+        ).collect()
+        assert result.to_dict("records") == [{"group_name": "A", "total": 3}]

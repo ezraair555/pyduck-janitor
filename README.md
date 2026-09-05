@@ -229,6 +229,21 @@ These are the only truly *new* methods (no pyjanitor counterpart) — they exist
 - [`asof_join()`](docs/api/functions.md#asof_join) - Point-in-time temporal joins with backward, forward, nearest, key, and tolerance matching
 - [`window_mutate()`](docs/api/functions.md#window_mutate) - Composable partitioned, ordered, framed window expressions
 - [`recursive_cte()`](docs/api/functions.md#recursive_cte) - Recursive hierarchy, path, and reachability queries rooted in the current relation
+- [`validate_keys()`](docs/api/functions.md#validate_keys) - Validate nulls, duplicates, and optional date bounds before temporal or graph operations
+- [`deduplicate()`](docs/api/functions.md#deduplicate) - Deterministically keep one row per key
+- [`filter_noise()`](docs/api/functions.md#filter_noise) - Remove configured IDs, regex matches, and low-frequency entities
+- [`hierarchy_edges()`](docs/api/functions.md#hierarchy_edges) - Normalize and validate entity/parent tables into directed edges
+- [`time_slice()`](docs/api/functions.md#time_slice) / [`event_window()`](docs/api/functions.md#event_window) - Reusable temporal filters
+- [`change_detection()`](docs/api/functions.md#change_detection) - Detect field-level changes within ordered entity histories
+- [`network_evolution()`](docs/api/functions.md#network_evolution) - Run graph metrics across time periods and calculate metric deltas
+- [`metrics()`](docs/api/functions.md#metrics) - Calculate named aggregates in one database-native query
+- [`profile()`](docs/api/functions.md#profile) - Profile every column with null, distinct, range, and type statistics
+- [`metric_cube()`](docs/api/functions.md#metric_cube) - Calculate detail rows, rollups, cubes, and exact grouping sets
+- [`rate_metrics()`](docs/api/functions.md#rate_metrics) - Calculate safe numerator/denominator rates
+- [`cohort_metrics()`](docs/api/functions.md#cohort_metrics) - Calculate cohort size, activity, and retention
+- [`freshness()`](docs/api/functions.md#freshness) - Report row count, latest timestamp, age, and staleness
+- [`reconcile()`](docs/api/functions.md#reconcile) - Compare key coverage between two relations
+- [`metric_from_database()`](docs/api/functions.md#metric_from_database) - Aggregate at the source database before transfer
 - [`sql()`](docs/api/functions.md#sql) - Escape hatch: raw SQL against the current relation (use `self` as the table name)
 - [`explain()`](docs/api/functions.md#explain) - EXPLAIN plan for the current pipeline
 - [`collect()`](docs/api/functions.md#collect) / [`head()`](docs/api/functions.md#head) - Materialize to pandas / preview rows
@@ -377,6 +392,72 @@ tree = org.recursive_cte(
 
 Together with `asof_join()`, these primitives support point-in-time
 organizational hierarchy analysis while keeping the computation in DuckDB.
+
+### Database-native metrics
+
+For database extracts, use `metrics()` for named aggregates and `profile()`
+for a compact column-quality overview:
+
+```python
+summary = employees.metrics(
+    {
+        "headcount": ("employee_id", "count_distinct"),
+        "average_salary": ("salary", "mean"),
+        "total_salary": ("salary", "sum"),
+    },
+    group_by=["department", "year"],
+)
+profile = employees.profile()
+```
+
+`metric_cube()` supports detail rows, hierarchical subtotals, all-dimension
+cubes, and exact grouping sets. It adds `grouping_level`, `grouping_id`,
+`is_total`, and `is_grand_total` when totals are enabled:
+
+```python
+cube = employees.metric_cube(
+    ["year", "department", "region"],
+    {"total_salary": "SUM(salary)", "headcount": "COUNT(DISTINCT employee_id)"},
+    totals="rollup",
+    grand_total=True,
+    total_label="ALL",
+)
+```
+
+Use `rate_metrics()` for safe ratios, `cohort_metrics()` for retention-style
+analysis, `freshness()` for source monitoring, and `reconcile()` for key
+coverage checks between snapshots. For very large external sources,
+`metric_from_database()` generates the aggregate query around the source SQL
+so the source database performs the aggregation before pandas transfers it.
+
+### Generic ONA and temporal analysis
+
+The ONA-oriented helpers are deliberately generic: they operate on entity,
+parent, edge, and event tables without assuming an HR schema. Validate and
+shape data before building a graph, then detect changes or run graph metrics
+over time:
+
+```python
+events = DuckJanitor.from_pandas(history)
+events.validate_keys("employee_id", date_col="event_date", unique=False)
+events = events.deduplicate("employee_id", order_by="event_date", keep="last")
+edges = events.hierarchy_edges("employee_id", "manager_id")
+changes = events.change_detection(
+    "employee_id", "event_date", columns=["manager_id", "department"]
+)
+evolution = edges.network_evolution(
+    date_col="event_date",
+    source="source",
+    target="target",
+    algorithms=["pagerank", "components"],
+    auto_install=True,
+)
+```
+
+`network_evolution()` returns one `DuckJanitor` relation per algorithm with a
+period column and, when the graph result exposes node metrics, a
+`metric_delta` column. It uses the optional Onager adapter and keeps extension
+installation opt-in.
 
 ### External database connections
 

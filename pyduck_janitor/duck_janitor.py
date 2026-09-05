@@ -1116,6 +1116,431 @@ class DuckJanitor:
             for name in names
         }
 
+    def network_evolution(
+        self,
+        date_col: str,
+        source: str,
+        target: str,
+        algorithms: Union[str, list[str]],
+        *,
+        frequency: str = "month",
+        weight: Optional[str] = None,
+        include_deltas: bool = True,
+        auto_install: bool = False,
+    ) -> dict[str, "DuckJanitor"]:
+        """Run graph algorithms across time and return metric trajectories.
+
+        The current relation must contain edge endpoints and a snapshot date.
+        Each algorithm is evaluated independently for every distinct
+        ``date_trunc(frequency, date_col)`` period. Results include a
+        ``period`` column; when the result exposes a ``node_id`` column and a
+        numeric metric column, ``metric_delta`` is added per node.
+        """
+        if date_col not in self._relation.columns:
+            raise ValueError(f"network_evolution(): unknown date column {date_col!r}")
+        if frequency not in {"day", "week", "month", "quarter", "year"}:
+            raise ValueError("network_evolution(): unsupported frequency")
+        if source not in self._relation.columns or target not in self._relation.columns:
+            raise ValueError("network_evolution(): source and target columns are required")
+        algorithm_names = [algorithms] if isinstance(algorithms, str) else list(algorithms)
+        relation_name = f"_network_evolution_{id(self._relation)}"
+        self._connection.register(relation_name, self._relation)
+        periods = self._connection.sql(
+            f"SELECT DISTINCT date_trunc('{frequency}', CAST({self._quote(date_col)} AS TIMESTAMP)) "
+            f"AS period FROM {self._quote(relation_name)} "
+            f"WHERE {self._quote(date_col)} IS NOT NULL ORDER BY period"
+        ).fetchall()
+        collected: dict[str, list[str]] = {name: [] for name in algorithm_names}
+        for period_index, (period,) in enumerate(periods):
+            period_name = f"_network_period_{id(self._relation)}_{period_index}"
+            period_relation = self._connection.sql(
+                f"SELECT * FROM {self._quote(relation_name)} "
+                f"WHERE date_trunc('{frequency}', CAST({self._quote(date_col)} AS TIMESTAMP)) "
+                f"= {self._sql_value(period)}"
+            )
+            period_janitor = DuckJanitor(period_relation, self._connection)
+            results = period_janitor.graph_analyze(
+                source,
+                target,
+                algorithm_names,
+                weight=weight,
+                auto_install=auto_install,
+            )
+            for name, result in results.items():
+                result_name = f"{period_name}_{name}"
+                self._connection.register(result_name, result._relation)
+                collected[name].append(
+                    f"SELECT *, {self._sql_value(period)} AS period FROM {self._quote(result_name)}"
+                )
+        output: dict[str, DuckJanitor] = {}
+        for name, queries in collected.items():
+            if not queries:
+                continue
+            union_query = " UNION ALL ".join(queries)
+            combined_name = f"_network_combined_{id(self._relation)}_{name}"
+            combined = self._connection.sql(union_query)
+            self._connection.register(combined_name, combined)
+            columns = list(combined.columns)
+            if include_deltas and "node_id" in columns:
+                numeric_types = {
+                    "TINYINT",
+                    "SMALLINT",
+                    "INTEGER",
+                    "BIGINT",
+                    "HUGEINT",
+                    "DECIMAL",
+                    "FLOAT",
+                    "DOUBLE",
+                }
+                metric_column = next(
+                    (
+                        column
+                        for column, dtype in zip(combined.columns, combined.types)
+                        if column not in {"node_id", "period"}
+                        and any(token in str(dtype).upper() for token in numeric_types)
+                    ),
+                    None,
+                )
+                if metric_column:
+                    query = (
+                        "SELECT *, "
+                        f"{self._quote(metric_column)} - LAG({self._quote(metric_column)}) "
+                        f"OVER (PARTITION BY {self._quote('node_id')} ORDER BY period) "
+                        "AS metric_delta "
+                        f"FROM {self._quote(combined_name)}"
+                    )
+                    combined = self._connection.sql(query)
+            output[name] = DuckJanitor(combined, self._connection)
+        return output
+
+    def metrics(
+        self,
+        metrics: dict[str, Any],
+        *,
+        group_by: Optional[Union[str, list[str]]] = None,
+        where: Optional[str] = None,
+    ) -> "DuckJanitor":
+        """Calculate named database-native aggregate metrics in one scan.
+
+        Metric values may be ``(column, function)`` tuples or raw SQL
+        expressions. Supported function aliases include ``count``,
+        ``count_distinct``, ``sum``, ``mean``, ``median``, ``min``, ``max``,
+        ``std``, and ``quantile:0.95``.
+        """
+        if not metrics:
+            raise ValueError("metrics(): metrics must be non-empty")
+        groups = [group_by] if isinstance(group_by, str) else list(group_by or [])
+        missing = [column for column in groups if column not in self._relation.columns]
+        if missing:
+            raise ValueError(f"metrics(): unknown group_by columns {missing}")
+        select_parts = [self._quote(column) for column in groups]
+        columns = set(self._relation.columns)
+        aliases = set()
+        for alias, spec in metrics.items():
+            if not isinstance(alias, str) or not alias:
+                raise ValueError("metrics(): metric names must be non-empty strings")
+            if alias in aliases:
+                raise ValueError(f"metrics(): duplicate metric name {alias!r}")
+            aliases.add(alias)
+            if isinstance(spec, str):
+                expression = spec
+            elif isinstance(spec, (tuple, list)) and len(spec) == 2:
+                source, function = spec
+                if source != "*" and source not in columns:
+                    raise ValueError(f"metrics(): unknown source column {source!r}")
+                function = str(function).lower()
+                if function == "count":
+                    expression = "COUNT(*)" if source == "*" else f"COUNT({self._quote(source)})"
+                elif function == "count_distinct":
+                    expression = f"COUNT(DISTINCT {self._quote(source)})"
+                elif function in {"sum", "mean", "avg", "median", "min", "max", "std", "stddev"}:
+                    aggregate = (
+                        "AVG"
+                        if function == "mean"
+                        else ("STDDEV_SAMP" if function == "std" else function.upper())
+                    )
+                    expression = f"{aggregate}({self._quote(source)})"
+                elif function.startswith("quantile:"):
+                    quantile = float(function.split(":", 1)[1])
+                    if not 0 <= quantile <= 1:
+                        raise ValueError("metrics(): quantile must be between 0 and 1")
+                    expression = f"QUANTILE_CONT({self._quote(source)}, {quantile})"
+                else:
+                    raise ValueError(f"metrics(): unsupported aggregate {function!r}")
+            else:
+                raise ValueError(f"metrics(): invalid specification for {alias!r}")
+            select_parts.append(f"{expression} AS {self._quote(alias)}")
+        relation_name = f"_metrics_{id(self._relation)}"
+        self._connection.register(relation_name, self._relation)
+        query = f"SELECT {', '.join(select_parts)} FROM {self._quote(relation_name)}"
+        if where:
+            query += f" WHERE {where}"
+        if groups:
+            query += f" GROUP BY {', '.join(self._quote(column) for column in groups)}"
+        return DuckJanitor(self._connection.sql(query), self._connection)
+
+    def profile(self) -> "DuckJanitor":
+        """Return one profiling row per column using DuckDB aggregates."""
+        relation_name = f"_profile_{id(self._relation)}"
+        self._connection.register(relation_name, self._relation)
+        queries = []
+        for column in self._relation.columns:
+            quoted = self._quote(column)
+            queries.append(
+                "SELECT "
+                f"{self._sql_value(column)} AS column_name, "
+                f"{self._sql_value(str(self._relation.types[list(self._relation.columns).index(column)]))} AS data_type, "
+                f"COUNT(*) AS row_count, COUNT(*) - COUNT({quoted}) AS null_count, "
+                f"CASE WHEN COUNT(*) = 0 THEN 0.0 ELSE (COUNT(*) - COUNT({quoted})) / CAST(COUNT(*) AS DOUBLE) END AS null_rate, "
+                f"COUNT(DISTINCT {quoted}) AS distinct_count, "
+                f"CASE WHEN COUNT(*) = 0 THEN 0.0 ELSE COUNT(DISTINCT {quoted}) / CAST(COUNT(*) AS DOUBLE) END AS distinct_rate, "
+                f"CAST(MIN({quoted}) AS VARCHAR) AS min_value, CAST(MAX({quoted}) AS VARCHAR) AS max_value "
+                f"FROM {self._quote(relation_name)}"
+            )
+        return DuckJanitor(self._connection.sql(" UNION ALL ".join(queries)), self._connection)
+
+    def metric_cube(
+        self,
+        dimensions: list[str],
+        measures: dict[str, str],
+        *,
+        totals: Optional[str] = None,
+        grouping_sets: Optional[list[list[str]]] = None,
+        grand_total: bool = True,
+        total_label: str = "ALL",
+    ) -> "DuckJanitor":
+        """Calculate detail metrics plus optional ROLLUP/CUBE subtotals."""
+        if not dimensions:
+            raise ValueError("metric_cube(): dimensions must be non-empty")
+        missing = [column for column in dimensions if column not in self._relation.columns]
+        if missing:
+            raise ValueError(f"metric_cube(): unknown dimensions {missing}")
+        if not measures:
+            raise ValueError("metric_cube(): measures must be non-empty")
+        if totals not in {None, "rollup", "cube", "grouping_sets"}:
+            raise ValueError(
+                "metric_cube(): totals must be None, 'rollup', 'cube', or 'grouping_sets'"
+            )
+        if totals == "grouping_sets":
+            if grouping_sets is None:
+                raise ValueError("metric_cube(): grouping_sets is required")
+            for subset in grouping_sets:
+                unknown = [column for column in subset if column not in dimensions]
+                if unknown:
+                    raise ValueError(f"metric_cube(): unknown grouping-set dimensions {unknown}")
+        relation_name = f"_metric_cube_{id(self._relation)}"
+        self._connection.register(relation_name, self._relation)
+        if totals == "rollup":
+            group_clause = f"ROLLUP ({', '.join(self._quote(column) for column in dimensions)})"
+        elif totals == "cube":
+            group_clause = f"CUBE ({', '.join(self._quote(column) for column in dimensions)})"
+        elif totals == "grouping_sets":
+            rendered = []
+            for subset in grouping_sets or []:
+                rendered.append("(" + ", ".join(self._quote(column) for column in subset) + ")")
+            group_clause = f"GROUPING SETS ({', '.join(rendered)})"
+        else:
+            group_clause = ", ".join(self._quote(column) for column in dimensions)
+        select_parts = []
+        for column in dimensions:
+            quoted = self._quote(column)
+            if totals is None:
+                select_parts.append(quoted)
+            else:
+                select_parts.append(
+                    f"CASE WHEN GROUPING({quoted}) = 1 THEN {self._sql_value(total_label)} "
+                    f"ELSE CAST({quoted} AS VARCHAR) END AS {quoted}"
+                )
+        select_parts.extend(
+            f"{expression} AS {self._quote(alias)}" for alias, expression in measures.items()
+        )
+        if totals is not None:
+            grouping_flags = [f"GROUPING({self._quote(column)})" for column in dimensions]
+            flag_sum = " + ".join(grouping_flags)
+            select_parts.extend(
+                [
+                    f"GROUPING_ID({', '.join(self._quote(column) for column in dimensions)}) AS grouping_id",
+                    f"CASE WHEN ({flag_sum}) = {len(dimensions)} THEN 'grand_total' WHEN ({flag_sum}) > 0 THEN 'subtotal' ELSE 'detail' END AS grouping_level",
+                    f"(({flag_sum}) > 0) AS is_total",
+                    f"(({flag_sum}) = {len(dimensions)}) AS is_grand_total",
+                ]
+            )
+        query = f"SELECT {', '.join(select_parts)} FROM {self._quote(relation_name)} GROUP BY {group_clause}"
+        if totals is not None and not grand_total:
+            query += f" HAVING ({' + '.join(f'GROUPING({self._quote(column)})' for column in dimensions)}) < {len(dimensions)}"
+        return DuckJanitor(self._connection.sql(query), self._connection)
+
+    def rate_metrics(
+        self,
+        rates: dict[str, tuple[str, str]],
+        *,
+        group_by: Optional[Union[str, list[str]]] = None,
+        where: Optional[str] = None,
+    ) -> "DuckJanitor":
+        """Calculate safe numerator/denominator rates by group."""
+        groups = [group_by] if isinstance(group_by, str) else list(group_by or [])
+        missing = [column for column in groups if column not in self._relation.columns]
+        if missing:
+            raise ValueError(f"rate_metrics(): unknown group_by columns {missing}")
+        if not rates:
+            raise ValueError("rate_metrics(): rates must be non-empty")
+        expressions = [self._quote(column) for column in groups]
+        for alias, (numerator, denominator) in rates.items():
+            expressions.append(
+                f"CAST(({numerator}) AS DOUBLE) / NULLIF(({denominator}), 0) AS {self._quote(alias)}"
+            )
+        relation_name = f"_rate_metrics_{id(self._relation)}"
+        self._connection.register(relation_name, self._relation)
+        query = f"SELECT {', '.join(expressions)} FROM {self._quote(relation_name)}"
+        if where:
+            query += f" WHERE {where}"
+        if groups:
+            query += f" GROUP BY {', '.join(self._quote(column) for column in groups)}"
+        return DuckJanitor(self._connection.sql(query), self._connection)
+
+    def cohort_metrics(
+        self,
+        entity: str,
+        activity_date: str,
+        *,
+        frequency: str = "month",
+        cohort_date: Optional[str] = None,
+    ) -> "DuckJanitor":
+        """Calculate cohort size, active entities, and retention by period."""
+        if entity not in self._relation.columns or activity_date not in self._relation.columns:
+            raise ValueError("cohort_metrics(): entity and activity_date columns are required")
+        if frequency not in {"day", "week", "month", "quarter", "year"}:
+            raise ValueError("cohort_metrics(): unsupported frequency")
+        relation_name = f"_cohort_metrics_{id(self._relation)}"
+        self._connection.register(relation_name, self._relation)
+        cohort_expression = (
+            self._quote(cohort_date) if cohort_date else f"MIN({self._quote(activity_date)})"
+        )
+        query = f"""
+            WITH base AS (
+                SELECT {self._quote(entity)} AS entity_id,
+                       date_trunc('{frequency}', CAST({self._quote(activity_date)} AS TIMESTAMP)) AS activity_period,
+                       date_trunc('{frequency}', CAST({cohort_expression} AS TIMESTAMP)) AS cohort_period
+                FROM {self._quote(relation_name)}
+                GROUP BY {self._quote(entity)}, activity_period
+            ), cohorts AS (
+                SELECT cohort_period, COUNT(DISTINCT entity_id) AS cohort_size
+                FROM base GROUP BY cohort_period
+            )
+            SELECT b.cohort_period,
+                   date_diff('{frequency}', b.cohort_period, b.activity_period) AS period_number,
+                   c.cohort_size,
+                   COUNT(DISTINCT b.entity_id) AS active_entities,
+                   COUNT(DISTINCT b.entity_id) / CAST(c.cohort_size AS DOUBLE) AS retention_rate
+            FROM base b JOIN cohorts c USING (cohort_period)
+            GROUP BY b.cohort_period, period_number, c.cohort_size
+            ORDER BY b.cohort_period, period_number
+        """
+        return DuckJanitor(self._connection.sql(query), self._connection)
+
+    def freshness(
+        self,
+        timestamp_col: str,
+        *,
+        stale_after: Optional[str] = None,
+    ) -> "DuckJanitor":
+        """Return row count, latest timestamp, age, and stale status."""
+        if timestamp_col not in self._relation.columns:
+            raise ValueError(f"freshness(): unknown timestamp column {timestamp_col!r}")
+        relation_name = f"_freshness_{id(self._relation)}"
+        self._connection.register(relation_name, self._relation)
+        query = (
+            f"SELECT COUNT(*) AS row_count, MAX(CAST({self._quote(timestamp_col)} AS TIMESTAMP)) AS max_timestamp, "
+            f"EPOCH(CURRENT_TIMESTAMP - MAX(CAST({self._quote(timestamp_col)} AS TIMESTAMP))) AS age_seconds"
+        )
+        if stale_after:
+            query += f", MAX(CAST({self._quote(timestamp_col)} AS TIMESTAMP)) < CURRENT_TIMESTAMP - INTERVAL '{stale_after}' AS is_stale"
+        else:
+            query += ", NULL::BOOLEAN AS is_stale"
+        return DuckJanitor(
+            self._connection.sql(query + f" FROM {self._quote(relation_name)}"), self._connection
+        )
+
+    def reconcile(
+        self,
+        other: "DuckJanitor",
+        keys: Union[str, list[str]],
+    ) -> "DuckJanitor":
+        """Summarize key coverage and duplicate differences between relations."""
+        keys = [keys] if isinstance(keys, str) else list(keys)
+        missing_left = [column for column in keys if column not in self._relation.columns]
+        missing_right = [column for column in keys if column not in other._relation.columns]
+        if missing_left or missing_right:
+            raise ValueError(
+                f"reconcile(): missing keys left={missing_left}, right={missing_right}"
+            )
+        left_name, right_name = (
+            f"_reconcile_left_{id(self._relation)}",
+            f"_reconcile_right_{id(other._relation)}",
+        )
+        self._connection.register(left_name, self._relation)
+        self._connection.register(right_name, other._relation)
+        condition = " AND ".join(
+            f"l.{self._quote(column)} IS NOT DISTINCT FROM r.{self._quote(column)}"
+            for column in keys
+        )
+        left_key = ", ".join(f"l.{self._quote(column)}" for column in keys)
+        right_key = ", ".join(f"r.{self._quote(column)}" for column in keys)
+        query = f"""
+            WITH left_keys AS (SELECT {left_key}, COUNT(*) AS n FROM {self._quote(left_name)} l GROUP BY {left_key}),
+                 right_keys AS (SELECT {right_key}, COUNT(*) AS n FROM {self._quote(right_name)} r GROUP BY {right_key}),
+                 matched AS (
+                     SELECT l.n AS left_n, r.n AS right_n
+                     FROM left_keys l JOIN right_keys r ON {condition}
+                 )
+            SELECT (SELECT COUNT(*) FROM {self._quote(left_name)}) AS left_rows,
+                   (SELECT COUNT(*) FROM {self._quote(right_name)}) AS right_rows,
+                   (SELECT COUNT(*) FROM left_keys) AS left_distinct_keys,
+                   (SELECT COUNT(*) FROM right_keys) AS right_distinct_keys,
+                   (SELECT COUNT(*) FROM matched) AS matched_keys,
+                   (SELECT COALESCE(SUM(left_n), 0) FROM matched) AS matched_left_rows,
+                   (SELECT COALESCE(SUM(right_n), 0) FROM matched) AS matched_right_rows
+        """
+        return DuckJanitor(self._connection.sql(query), self._connection)
+
+    @classmethod
+    def metric_from_database(
+        cls,
+        connection: Any,
+        query: str,
+        metrics: dict[str, Any],
+        *,
+        group_by: Optional[Union[str, list[str]]] = None,
+        where: Optional[str] = None,
+        params: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> "DuckJanitor":
+        """Execute a portable aggregate in the source database before transfer."""
+        groups = [group_by] if isinstance(group_by, str) else list(group_by or [])
+        select_parts = list(groups)
+        for alias, spec in metrics.items():
+            if isinstance(spec, str):
+                expression = spec
+            else:
+                source, function = spec
+                function = str(function).lower()
+                aggregate = {"mean": "AVG", "count_distinct": "COUNT(DISTINCT"}.get(
+                    function, function.upper()
+                )
+                if function == "count_distinct":
+                    expression = f"COUNT(DISTINCT {source})"
+                elif function == "count":
+                    expression = "COUNT(*)" if source == "*" else f"COUNT({source})"
+                else:
+                    expression = f"{aggregate}({source})"
+            select_parts.append(f"{expression} AS {alias}")
+        source_sql = f"SELECT {', '.join(select_parts)} FROM ({query}) AS source"
+        if where:
+            source_sql += f" WHERE {where}"
+        if groups:
+            source_sql += f" GROUP BY {', '.join(groups)}"
+        return cls.from_database(connection, source_sql, params=params, **kwargs)
+
     def diff(
         self,
         other: "DuckJanitor",
@@ -1267,6 +1692,337 @@ class DuckJanitor:
         except Exception:
             self._connection.register(right_name, other.collect())
         return left_name, right_name
+
+    def validate_keys(
+        self,
+        keys: Union[str, list[str]],
+        *,
+        date_col: Optional[str] = None,
+        date_lower: Optional[Any] = None,
+        date_upper: Optional[Any] = None,
+        allow_null: bool = False,
+        unique: bool = True,
+    ) -> "DuckJanitor":
+        """Validate key columns and optional date bounds.
+
+        The current relation is returned unchanged when validation passes.
+        This makes validation composable at the start of a pipeline while
+        failing before temporal joins, diffs, or graph construction.
+        """
+        key_list = [keys] if isinstance(keys, str) else list(keys)
+        if not key_list or any(not isinstance(key, str) or not key for key in key_list):
+            raise ValueError("validate_keys(): keys must contain at least one column name")
+        columns = set(self._relation.columns)
+        missing = [column for column in key_list if column not in columns]
+        if missing:
+            raise ValueError(f"validate_keys(): unknown key columns {missing}")
+        if date_col is not None and date_col not in columns:
+            raise ValueError(f"validate_keys(): unknown date column {date_col!r}")
+
+        relation_name = f"_validate_keys_{id(self._relation)}"
+        self._connection.register(relation_name, self._relation)
+        quoted_keys = ", ".join(self._quote(column) for column in key_list)
+        if not allow_null:
+            null_predicate = " OR ".join(f"{self._quote(column)} IS NULL" for column in key_list)
+            null_count = self._connection.sql(
+                f"SELECT COUNT(*) FROM {self._quote(relation_name)} WHERE {null_predicate}"
+            ).fetchone()[0]
+            if null_count:
+                raise ValueError(f"validate_keys(): key columns contain {null_count} NULL row(s)")
+        if unique:
+            duplicate_count = self._connection.sql(
+                f"SELECT COUNT(*) - COUNT(DISTINCT ({quoted_keys})) "
+                f"FROM {self._quote(relation_name)}"
+            ).fetchone()[0]
+            if duplicate_count:
+                raise ValueError(
+                    f"validate_keys(): key columns contain {duplicate_count} duplicate row(s)"
+                )
+        if date_col is not None and (date_lower is not None or date_upper is not None):
+            date_predicates = []
+            if date_lower is not None:
+                date_predicates.append(
+                    f"CAST({self._quote(date_col)} AS DATE) < {self._sql_value(date_lower)}"
+                )
+            if date_upper is not None:
+                date_predicates.append(
+                    f"CAST({self._quote(date_col)} AS DATE) > {self._sql_value(date_upper)}"
+                )
+            out_of_range = self._connection.sql(
+                f"SELECT COUNT(*) FROM {self._quote(relation_name)} "
+                f"WHERE {' OR '.join(date_predicates)}"
+            ).fetchone()[0]
+            if out_of_range:
+                raise ValueError(f"validate_keys(): {out_of_range} row(s) fall outside date bounds")
+        return self
+
+    def deduplicate(
+        self,
+        keys: Union[str, list[str]],
+        *,
+        order_by: Optional[Union[str, list[str]]] = None,
+        keep: str = "first",
+    ) -> "DuckJanitor":
+        """Keep one deterministic row per key combination.
+
+        Parameters
+        ----------
+        keys : str or list[str]
+            Columns defining duplicate groups.
+        order_by : str or list[str], optional
+            Columns used to choose the retained row. The first or last row
+            under this ordering is retained. Without it, source order is used.
+        keep : {"first", "last"}, default "first"
+            Which ordered row to retain.
+        """
+        if keep not in {"first", "last"}:
+            raise ValueError("deduplicate(): keep must be 'first' or 'last'")
+        key_list = [keys] if isinstance(keys, str) else list(keys)
+        order_list = [order_by] if isinstance(order_by, str) else list(order_by or [])
+        columns = set(self._relation.columns)
+        missing = [column for column in key_list + order_list if column not in columns]
+        if not key_list or missing:
+            raise ValueError(f"deduplicate(): unknown or missing columns {missing or key_list}")
+        relation_name = f"_deduplicate_{id(self._relation)}"
+        self._connection.register(relation_name, self._relation)
+        partition_sql = ", ".join(self._quote(column) for column in key_list)
+        if order_list:
+            direction = "ASC" if keep == "first" else "DESC"
+            order_sql = ", ".join(f"{self._quote(column)} {direction}" for column in order_list)
+        else:
+            order_sql = "row_number() OVER ()"
+        selected = ", ".join(self._quote(column) for column in self._relation.columns)
+        query = (
+            "WITH ranked AS ("
+            f"SELECT {selected}, ROW_NUMBER() OVER (PARTITION BY {partition_sql} "
+            f"ORDER BY {order_sql}) AS __pyduck_dedup_rank "
+            f"FROM {self._quote(relation_name)}) "
+            "SELECT " + selected + " FROM ranked WHERE __pyduck_dedup_rank = 1"
+        )
+        return DuckJanitor(self._connection.query(query), self._connection)
+
+    def filter_noise(
+        self,
+        *,
+        id_col: Optional[str] = None,
+        exclude_ids: Optional[list[Any]] = None,
+        exclude_regex: Optional[str] = None,
+        min_records: Optional[int] = None,
+        where: Optional[str] = None,
+    ) -> "DuckJanitor":
+        """Filter known noise records before longitudinal or graph analysis.
+
+        ``filter_noise`` is intentionally domain-neutral: it can remove test
+        IDs, service accounts, malformed records, or low-frequency entities
+        using explicit criteria supplied by the caller.
+        """
+        if id_col is not None and id_col not in self._relation.columns:
+            raise ValueError(f"filter_noise(): unknown id column {id_col!r}")
+        if min_records is not None and min_records < 1:
+            raise ValueError("filter_noise(): min_records must be at least 1")
+        if (exclude_ids or exclude_regex or min_records is not None) and id_col is None:
+            raise ValueError("filter_noise(): id_col is required for ID-based filters")
+        relation_name = f"_filter_noise_{id(self._relation)}"
+        self._connection.register(relation_name, self._relation)
+        predicates = [where] if where else []
+        if exclude_ids:
+            values = ", ".join(self._sql_value(value) for value in exclude_ids)
+            predicates.append(f"{self._quote(id_col)} NOT IN ({values})")
+        if exclude_regex:
+            predicates.append(
+                f"NOT regexp_matches(CAST({self._quote(id_col)} AS VARCHAR), "
+                f"{self._sql_value(exclude_regex)})"
+            )
+        if min_records is not None:
+            predicates.append(f"__pyduck_noise_count >= {int(min_records)}")
+        selected = ", ".join(self._quote(column) for column in self._relation.columns)
+        if min_records is not None:
+            query = (
+                f"WITH counted AS (SELECT {selected}, "
+                f"COUNT(*) OVER (PARTITION BY {self._quote(id_col)}) AS __pyduck_noise_count "
+                f"FROM {self._quote(relation_name)}) SELECT {selected} FROM counted "
+                f"WHERE {' AND '.join(predicates)}"
+            )
+        else:
+            query = f"SELECT {selected} FROM {self._quote(relation_name)}"
+            if predicates:
+                query += " WHERE " + " AND ".join(predicates)
+        return DuckJanitor(self._connection.query(query), self._connection)
+
+    def hierarchy_edges(
+        self,
+        source: str,
+        parent: str,
+        *,
+        source_name: str = "source",
+        target_name: str = "target",
+        drop_null_parent: bool = True,
+        reject_self_loops: bool = True,
+        deduplicate: bool = True,
+    ) -> "DuckJanitor":
+        """Convert an entity/parent relation into a directed edge relation."""
+        columns = set(self._relation.columns)
+        missing = [column for column in (source, parent) if column not in columns]
+        if missing:
+            raise ValueError(f"hierarchy_edges(): unknown columns {missing}")
+        for name in (source_name, target_name):
+            if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                raise ValueError(f"hierarchy_edges(): invalid output column {name!r}")
+        relation_name = f"_hierarchy_edges_{id(self._relation)}"
+        self._connection.register(relation_name, self._relation)
+        predicates = []
+        if drop_null_parent:
+            predicates.append(f"{self._quote(parent)} IS NOT NULL")
+        if reject_self_loops:
+            predicates.append(f"{self._quote(source)} IS DISTINCT FROM {self._quote(parent)}")
+        query = (
+            f"SELECT {self._quote(source)} AS {self._quote(source_name)}, "
+            f"{self._quote(parent)} AS {self._quote(target_name)} "
+            f"FROM {self._quote(relation_name)}"
+        )
+        if predicates:
+            query += " WHERE " + " AND ".join(predicates)
+        if deduplicate:
+            query = f"SELECT DISTINCT * FROM ({query}) hierarchy_edges"
+        return DuckJanitor(self._connection.query(query), self._connection)
+
+    def time_slice(
+        self,
+        date_col: str,
+        *,
+        start: Optional[Any] = None,
+        end: Optional[Any] = None,
+        inclusive: str = "both",
+    ) -> "DuckJanitor":
+        """Filter rows to a bounded temporal slice.
+
+        ``inclusive`` accepts ``"both"``, ``"left"``, ``"right"``, or
+        ``"neither"`` and controls boundary inclusion for ``start`` and
+        ``end``. Values are cast to ``TIMESTAMP`` so dates and timestamps can
+        be used together.
+        """
+        if date_col not in self._relation.columns:
+            raise ValueError(f"time_slice(): unknown date column {date_col!r}")
+        if start is None and end is None:
+            raise ValueError("time_slice(): start or end is required")
+        if inclusive not in {"both", "left", "right", "neither"}:
+            raise ValueError("time_slice(): inclusive must be both, left, right, or neither")
+        relation_name = f"_time_slice_{id(self._relation)}"
+        self._connection.register(relation_name, self._relation)
+        predicates = []
+        if start is not None:
+            operator = ">=" if inclusive in {"both", "left"} else ">"
+            predicates.append(
+                f"CAST({self._quote(date_col)} AS TIMESTAMP) {operator} "
+                f"CAST({self._sql_value(start)} AS TIMESTAMP)"
+            )
+        if end is not None:
+            operator = "<=" if inclusive in {"both", "right"} else "<"
+            predicates.append(
+                f"CAST({self._quote(date_col)} AS TIMESTAMP) {operator} "
+                f"CAST({self._sql_value(end)} AS TIMESTAMP)"
+            )
+        selected = ", ".join(self._quote(column) for column in self._relation.columns)
+        query = (
+            f"SELECT {selected} FROM {self._quote(relation_name)} WHERE {' AND '.join(predicates)}"
+        )
+        return DuckJanitor(self._connection.query(query), self._connection)
+
+    def event_window(
+        self,
+        date_col: str,
+        event_date: Any,
+        *,
+        pre_window: str = "0 days",
+        post_window: str = "0 days",
+    ) -> "DuckJanitor":
+        """Return rows in a relative window around an event timestamp.
+
+        Window values use DuckDB interval syntax, such as ``"30 days"`` or
+        ``"2 hours"``. Both endpoints are inclusive.
+        """
+        if date_col not in self._relation.columns:
+            raise ValueError(f"event_window(): unknown date column {date_col!r}")
+        interval_pattern = r"\d+(?:\.\d+)?\s+(?:microsecond|millisecond|second|minute|hour|day|week|month|quarter|year)s?"
+        for label, value in (("pre_window", pre_window), ("post_window", post_window)):
+            if not isinstance(value, str) or not re.fullmatch(
+                interval_pattern, value.strip(), re.I
+            ):
+                raise ValueError(f"event_window(): {label} must look like '30 days' or '2 hours'")
+        relation_name = f"_event_window_{id(self._relation)}"
+        self._connection.register(relation_name, self._relation)
+        selected = ", ".join(self._quote(column) for column in self._relation.columns)
+        event_value = f"CAST({self._sql_value(event_date)} AS TIMESTAMP)"
+        date_value = f"CAST({self._quote(date_col)} AS TIMESTAMP)"
+        query = (
+            f"SELECT {selected} FROM {self._quote(relation_name)} WHERE {date_value} "
+            f"BETWEEN {event_value} - INTERVAL {self._sql_value(pre_window)} "
+            f"AND {event_value} + INTERVAL {self._sql_value(post_window)}"
+        )
+        return DuckJanitor(self._connection.query(query), self._connection)
+
+    def change_detection(
+        self,
+        keys: Union[str, list[str]],
+        order_by: Union[str, list[str]],
+        *,
+        columns: Optional[list[str]] = None,
+        include_unchanged: bool = True,
+    ) -> "DuckJanitor":
+        """Annotate rows with changed columns relative to the prior row.
+
+        The result adds ``is_changed``, ``change_count``, and
+        ``changed_columns``. Comparisons are NULL-safe and partitioned by
+        ``keys`` in ``order_by`` order.
+        """
+        key_list = [keys] if isinstance(keys, str) else list(keys)
+        order_list = [order_by] if isinstance(order_by, str) else list(order_by)
+        relation_columns = list(self._relation.columns)
+        compare_columns = columns or [
+            column for column in relation_columns if column not in set(key_list + order_list)
+        ]
+        missing = [
+            column
+            for column in key_list + order_list + compare_columns
+            if column not in relation_columns
+        ]
+        if not key_list or not order_list or missing:
+            raise ValueError(f"change_detection(): unknown or missing columns {missing}")
+        relation_name = f"_change_detection_{id(self._relation)}"
+        self._connection.register(relation_name, self._relation)
+        partition_sql = ", ".join(self._quote(column) for column in key_list)
+        order_sql = ", ".join(self._quote(column) for column in order_list)
+        selected = ", ".join(self._quote(column) for column in relation_columns)
+        previous_columns = ", ".join(
+            f"LAG({self._quote(column)}) OVER (PARTITION BY {partition_sql} "
+            f"ORDER BY {order_sql}) AS {self._quote(f'__previous_{column}')}"
+            for column in compare_columns
+        )
+        previous_columns += (
+            f", ROW_NUMBER() OVER (PARTITION BY {partition_sql} ORDER BY {order_sql}) > 1 "
+            "AS __pyduck_has_previous"
+        )
+        change_predicates = [
+            f"{self._quote(column)} IS DISTINCT FROM {self._quote(f'__previous_{column}')}"
+            for column in compare_columns
+        ]
+        changed_cases = ", ".join(
+            f"CASE WHEN {predicate} THEN {self._sql_value(column)} ELSE NULL END"
+            for column, predicate in zip(compare_columns, change_predicates)
+        )
+        changed_condition = f"__pyduck_has_previous AND ({' OR '.join(change_predicates)})"
+        query = (
+            "WITH previous AS ("
+            f"SELECT {selected}, {previous_columns} FROM {self._quote(relation_name)}), "
+            "annotated AS (SELECT "
+            f"{selected}, ({changed_condition}) AS is_changed, "
+            f"list_count(list_filter([{changed_cases}], x -> x IS NOT NULL)) AS change_count, "
+            f"array_to_string(list_filter([{changed_cases}], x -> x IS NOT NULL), ', ') "
+            "AS changed_columns FROM previous) SELECT * FROM annotated"
+        )
+        if not include_unchanged:
+            query += " WHERE is_changed"
+        return DuckJanitor(self._connection.query(query), self._connection)
 
     def window_mutate(
         self,

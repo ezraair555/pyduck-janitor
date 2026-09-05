@@ -19,6 +19,7 @@ Complete function-by-function reference for every public method on
 | [`from_json`](#from_json) | Create a DuckJanitor from JSON / NDJSON file(s) | Loaders & pipeline plumbing |
 | [`from_parquet`](#from_parquet) | Create a DuckJanitor from Parquet file(s) | Loaders & pipeline plumbing |
 | [`from_database`](#from_database) | Create a DuckJanitor from a query on an external database | Loaders & pipeline plumbing |
+| [`metric_from_database`](#metric_from_database) | Execute a portable aggregate in the source database before transfer | Loaders & pipeline plumbing |
 | [`from_sql`](#from_sql) | Create a DuckJanitor from a SQL query | Loaders & pipeline plumbing |
 | [`load_extension`](#load_extension) | Load an optional DuckDB extension for this pipeline | Loaders & pipeline plumbing |
 | [`graph_algorithm`](#graph_algorithm) | Run an Onager graph table function over the current relation | Loaders & pipeline plumbing |
@@ -29,6 +30,21 @@ Complete function-by-function reference for every public method on
 | [`asof_join`](#asof_join) | Join each row to the nearest eligible temporal row on the right | Loaders & pipeline plumbing |
 | [`window_mutate`](#window_mutate) | Add one or more SQL window expressions to the relation | Loaders & pipeline plumbing |
 | [`recursive_cte`](#recursive_cte) | Execute a recursive CTE rooted in the current relation | Loaders & pipeline plumbing |
+| [`validate_keys`](#validate_keys) | Validate key columns and optional date bounds | Loaders & pipeline plumbing |
+| [`deduplicate`](#deduplicate) | Keep one deterministic row per key combination | Loaders & pipeline plumbing |
+| [`filter_noise`](#filter_noise) | Filter known noise records before longitudinal or graph analysis | Loaders & pipeline plumbing |
+| [`hierarchy_edges`](#hierarchy_edges) | Convert an entity/parent relation into a directed edge relation | Loaders & pipeline plumbing |
+| [`time_slice`](#time_slice) | Filter rows to a bounded temporal slice | Loaders & pipeline plumbing |
+| [`event_window`](#event_window) | Return rows in a relative window around an event timestamp | Loaders & pipeline plumbing |
+| [`change_detection`](#change_detection) | Annotate rows with changed columns relative to the prior row | Loaders & pipeline plumbing |
+| [`network_evolution`](#network_evolution) | Run graph algorithms across time and return metric trajectories | Loaders & pipeline plumbing |
+| [`metrics`](#metrics) | Calculate named database-native aggregate metrics in one scan | Loaders & pipeline plumbing |
+| [`profile`](#profile) | Return one profiling row per column using DuckDB aggregates | Loaders & pipeline plumbing |
+| [`metric_cube`](#metric_cube) | Calculate detail metrics plus optional ROLLUP/CUBE subtotals | Loaders & pipeline plumbing |
+| [`rate_metrics`](#rate_metrics) | Calculate safe numerator/denominator rates by group | Loaders & pipeline plumbing |
+| [`cohort_metrics`](#cohort_metrics) | Calculate cohort size, active entities, and retention by period | Loaders & pipeline plumbing |
+| [`freshness`](#freshness) | Return row count, latest timestamp, age, and stale status | Loaders & pipeline plumbing |
+| [`reconcile`](#reconcile) | Summarize key coverage and duplicate differences between relations | Loaders & pipeline plumbing |
 | [`collect`](#collect) | Execute the pipeline and return results as a pandas DataFrame | Loaders & pipeline plumbing |
 | [`head`](#head) | Return the first n rows | Loaders & pipeline plumbing |
 | [`sql`](#sql) | Execute a custom SQL query on the current relation | Loaders & pipeline plumbing |
@@ -376,6 +392,27 @@ the query result.
 >>> dj = DuckJanitor.from_database(db, 'SELECT * FROM people WHERE age > ?', [30])
 >>> dj.collect()['name'].tolist()
 >>> ['Ada']
+```
+
+
+
+<a id="metric_from_database"></a>
+### metric_from_database
+
+Execute a portable aggregate in the source database before transfer.
+
+```python
+metric_from_database(connection: Any, query: str, metrics: dict[str, typing.Any], *, group_by: Union[str, list[str], NoneType] = None, where: Optional[str] = None, params: Optional[Any] = None, **kwargs: Any) -> 'DuckJanitor'
+```
+
+**Example** *(from verified snippet)*
+
+```python
+>>> import sqlite3
+>>> db = sqlite3.connect(':memory:')
+>>> db.execute("CREATE TABLE t (g TEXT, a INTEGER)")
+>>> db.executemany("INSERT INTO t VALUES (?, ?)", [('x', 1), ('x', 2)])
+>>> DuckJanitor.metric_from_database(db, 'SELECT g, a FROM t', {'total': ('a', 'sum')}, group_by='g').collect()
 ```
 
 
@@ -732,6 +769,313 @@ The rows produced by the recursive CTE.
 >>> )
 >>> tree.collect()['depth'].tolist()
 >>> [0, 1, 2]
+```
+
+
+
+<a id="validate_keys"></a>
+### validate_keys
+
+Validate key columns and optional date bounds.
+
+The current relation is returned unchanged when validation passes.
+This makes validation composable at the start of a pipeline while
+failing before temporal joins, diffs, or graph construction.
+
+```python
+validate_keys(self, keys: Union[str, list[str]], *, date_col: Optional[str] = None, date_lower: Optional[Any] = None, date_upper: Optional[Any] = None, allow_null: bool = False, unique: bool = True) -> 'DuckJanitor'
+```
+
+**Example** *(from verified snippet)*
+
+```python
+>>> dj = DuckJanitor.from_pandas(pd.DataFrame({'id': [1, 2], 'value': [10, 20]}))
+>>> dj.validate_keys('id').collect()
+```
+
+
+
+<a id="deduplicate"></a>
+### deduplicate
+
+Keep one deterministic row per key combination.
+
+```python
+deduplicate(self, keys: Union[str, list[str]], *, order_by: Union[str, list[str], NoneType] = None, keep: str = 'first') -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **keys** — str or list[str]
+  Columns defining duplicate groups.
+- **order_by** — str or list[str], optional
+  Columns used to choose the retained row. The first or last row
+  under this ordering is retained. Without it, source order is used.
+- **keep** — {"first", "last"}, default "first"
+  Which ordered row to retain.
+
+**Example** *(from verified snippet)*
+
+```python
+>>> dj = DuckJanitor.from_pandas(pd.DataFrame({'id': [1, 1], 'as_of': [1, 2]}))
+>>> dj.deduplicate('id', order_by='as_of', keep='last').collect()
+```
+
+
+
+<a id="filter_noise"></a>
+### filter_noise
+
+Filter known noise records before longitudinal or graph analysis.
+
+``filter_noise`` is intentionally domain-neutral: it can remove test
+IDs, service accounts, malformed records, or low-frequency entities
+using explicit criteria supplied by the caller.
+
+```python
+filter_noise(self, *, id_col: Optional[str] = None, exclude_ids: Optional[list[Any]] = None, exclude_regex: Optional[str] = None, min_records: Optional[int] = None, where: Optional[str] = None) -> 'DuckJanitor'
+```
+
+**Example** *(from verified snippet)*
+
+```python
+>>> dj = DuckJanitor.from_pandas(pd.DataFrame({'id': [1, 2, 2]}))
+>>> dj.filter_noise(id_col='id', min_records=2).collect()
+```
+
+
+
+<a id="hierarchy_edges"></a>
+### hierarchy_edges
+
+Convert an entity/parent relation into a directed edge relation.
+
+```python
+hierarchy_edges(self, source: str, parent: str, *, source_name: str = 'source', target_name: str = 'target', drop_null_parent: bool = True, reject_self_loops: bool = True, deduplicate: bool = True) -> 'DuckJanitor'
+```
+
+**Example** *(from verified snippet)*
+
+```python
+>>> dj = DuckJanitor.from_pandas(pd.DataFrame({'employee_id': [2], 'manager_id': [1]}))
+>>> dj.hierarchy_edges('employee_id', 'manager_id').collect()
+```
+
+
+
+<a id="time_slice"></a>
+### time_slice
+
+Filter rows to a bounded temporal slice.
+
+``inclusive`` accepts ``"both"``, ``"left"``, ``"right"``, or
+``"neither"`` and controls boundary inclusion for ``start`` and
+``end``. Values are cast to ``TIMESTAMP`` so dates and timestamps can
+be used together.
+
+```python
+time_slice(self, date_col: str, *, start: Optional[Any] = None, end: Optional[Any] = None, inclusive: str = 'both') -> 'DuckJanitor'
+```
+
+**Example** *(from verified snippet)*
+
+```python
+>>> dj = DuckJanitor.from_pandas(pd.DataFrame({'event_date': pd.to_datetime(['2024-01-01', '2024-02-01'])}))
+>>> dj.time_slice('event_date', start='2024-01-15').collect()
+```
+
+
+
+<a id="event_window"></a>
+### event_window
+
+Return rows in a relative window around an event timestamp.
+
+Window values use DuckDB interval syntax, such as ``"30 days"`` or
+``"2 hours"``. Both endpoints are inclusive.
+
+```python
+event_window(self, date_col: str, event_date: Any, *, pre_window: str = '0 days', post_window: str = '0 days') -> 'DuckJanitor'
+```
+
+**Example** *(from verified snippet)*
+
+```python
+>>> dj = DuckJanitor.from_pandas(pd.DataFrame({'event_date': pd.to_datetime(['2024-01-01', '2024-01-10'])}))
+>>> dj.event_window('event_date', '2024-01-10', pre_window='2 days').collect()
+```
+
+
+
+<a id="change_detection"></a>
+### change_detection
+
+Annotate rows with changed columns relative to the prior row.
+
+The result adds ``is_changed``, ``change_count``, and
+``changed_columns``. Comparisons are NULL-safe and partitioned by
+``keys`` in ``order_by`` order.
+
+```python
+change_detection(self, keys: Union[str, list[str]], order_by: Union[str, list[str]], *, columns: Optional[list[str]] = None, include_unchanged: bool = True) -> 'DuckJanitor'
+```
+
+**Example** *(from verified snippet)*
+
+```python
+>>> dj = DuckJanitor.from_pandas(pd.DataFrame({'id': [1, 1], 'event_date': pd.to_datetime(['2024-01-01', '2024-01-02']), 'status': ['a', 'b']}))
+>>> dj.change_detection('id', 'event_date', columns=['status']).collect()
+```
+
+
+
+<a id="network_evolution"></a>
+### network_evolution
+
+Run graph algorithms across time and return metric trajectories.
+
+The current relation must contain edge endpoints and a snapshot date.
+Each algorithm is evaluated independently for every distinct
+``date_trunc(frequency, date_col)`` period. Results include a
+``period`` column; when the result exposes a ``node_id`` column and a
+numeric metric column, ``metric_delta`` is added per node.
+
+```python
+network_evolution(self, date_col: str, source: str, target: str, algorithms: Union[str, list[str]], *, frequency: str = 'month', weight: Optional[str] = None, include_deltas: bool = True, auto_install: bool = False) -> dict[str, 'DuckJanitor']
+```
+
+_No example available._
+
+
+
+<a id="metrics"></a>
+### metrics
+
+Calculate named database-native aggregate metrics in one scan.
+
+Metric values may be ``(column, function)`` tuples or raw SQL
+expressions. Supported function aliases include ``count``,
+``count_distinct``, ``sum``, ``mean``, ``median``, ``min``, ``max``,
+``std``, and ``quantile:0.95``.
+
+```python
+metrics(self, metrics: dict[str, typing.Any], *, group_by: Union[str, list[str], NoneType] = None, where: Optional[str] = None) -> 'DuckJanitor'
+```
+
+**Example** *(from verified snippet)*
+
+```python
+>>> dj = DuckJanitor.from_pandas(pd.DataFrame({'group': ['a', 'a'], 'value': [1, 2]}))
+>>> dj.metrics({'total': ('value', 'sum')}, group_by='group').collect()
+```
+
+
+
+<a id="profile"></a>
+### profile
+
+Return one profiling row per column using DuckDB aggregates.
+
+```python
+profile(self) -> 'DuckJanitor'
+```
+
+**Example** *(from verified snippet)*
+
+```python
+>>> dj = DuckJanitor.from_pandas(pd.DataFrame({'a': [1, 2], 'b': ['x', None]}))
+>>> dj.profile().collect()
+```
+
+
+
+<a id="metric_cube"></a>
+### metric_cube
+
+Calculate detail metrics plus optional ROLLUP/CUBE subtotals.
+
+```python
+metric_cube(self, dimensions: list[str], measures: dict[str, str], *, totals: Optional[str] = None, grouping_sets: Optional[list[list[str]]] = None, grand_total: bool = True, total_label: str = 'ALL') -> 'DuckJanitor'
+```
+
+**Example** *(from verified snippet)*
+
+```python
+>>> dj = DuckJanitor.from_pandas(pd.DataFrame({'year': [2024, 2024], 'region': ['E', 'W'], 'amount': [1, 2]}))
+>>> dj.metric_cube(['year', 'region'], {'total': 'SUM(amount)'}, totals='rollup').collect()
+```
+
+
+
+<a id="rate_metrics"></a>
+### rate_metrics
+
+Calculate safe numerator/denominator rates by group.
+
+```python
+rate_metrics(self, rates: dict[str, tuple[str, str]], *, group_by: Union[str, list[str], NoneType] = None, where: Optional[str] = None) -> 'DuckJanitor'
+```
+
+**Example** *(from verified snippet)*
+
+```python
+>>> dj = DuckJanitor.from_pandas(pd.DataFrame({'group': ['a', 'a'], 'success': [1, 0]}))
+>>> dj.rate_metrics({'rate': ('SUM(success)', 'COUNT(*)')}, group_by='group').collect()
+```
+
+
+
+<a id="cohort_metrics"></a>
+### cohort_metrics
+
+Calculate cohort size, active entities, and retention by period.
+
+```python
+cohort_metrics(self, entity: str, activity_date: str, *, frequency: str = 'month', cohort_date: Optional[str] = None) -> 'DuckJanitor'
+```
+
+**Example** *(from verified snippet)*
+
+```python
+>>> dj = DuckJanitor.from_pandas(pd.DataFrame({'user_id': [1, 1], 'event_date': pd.to_datetime(['2024-01-01', '2024-02-01'])}))
+>>> dj.cohort_metrics('user_id', 'event_date').collect()
+```
+
+
+
+<a id="freshness"></a>
+### freshness
+
+Return row count, latest timestamp, age, and stale status.
+
+```python
+freshness(self, timestamp_col: str, *, stale_after: Optional[str] = None) -> 'DuckJanitor'
+```
+
+**Example** *(from verified snippet)*
+
+```python
+>>> dj = DuckJanitor.from_pandas(pd.DataFrame({'event_date': pd.to_datetime(['2024-01-01'])}))
+>>> dj.freshness('event_date').collect()
+```
+
+
+
+<a id="reconcile"></a>
+### reconcile
+
+Summarize key coverage and duplicate differences between relations.
+
+```python
+reconcile(self, other: 'DuckJanitor', keys: Union[str, list[str]]) -> 'DuckJanitor'
+```
+
+**Example** *(from verified snippet)*
+
+```python
+>>> left = DuckJanitor.from_pandas(pd.DataFrame({'id': [1, 2]}))
+>>> right = DuckJanitor.from_pandas(pd.DataFrame({'id': [2, 3]}))
+>>> left.reconcile(right, 'id').collect()
 ```
 
 
