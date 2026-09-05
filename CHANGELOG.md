@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.5 - 2026-09-04
+
+### Fixed
+- Fixed the CI Python 3.9 matrix to use DuckDB 1.4.3, because DuckDB 1.5.x
+  requires Python 3.10 or newer.
+- Preserved the advertised Python 3.9 core-package support while keeping the
+  modern DuckDB 1.5.x extension tests on supported Python versions.
+
 ## 0.2.4 - 2026-09-04
 
 ### Added
