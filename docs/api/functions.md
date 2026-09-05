@@ -20,6 +20,9 @@ Complete function-by-function reference for every public method on
 | [`from_parquet`](#from_parquet) | Create a DuckJanitor from Parquet file(s) | Loaders & pipeline plumbing |
 | [`from_database`](#from_database) | Create a DuckJanitor from a query on an external database | Loaders & pipeline plumbing |
 | [`from_sql`](#from_sql) | Create a DuckJanitor from a SQL query | Loaders & pipeline plumbing |
+| [`asof_join`](#asof_join) | Join each row to the nearest eligible temporal row on the right | Loaders & pipeline plumbing |
+| [`window_mutate`](#window_mutate) | Add one or more SQL window expressions to the relation | Loaders & pipeline plumbing |
+| [`recursive_cte`](#recursive_cte) | Execute a recursive CTE rooted in the current relation | Loaders & pipeline plumbing |
 | [`collect`](#collect) | Execute the pipeline and return results as a pandas DataFrame | Loaders & pipeline plumbing |
 | [`head`](#head) | Return the first n rows | Loaders & pipeline plumbing |
 | [`sql`](#sql) | Execute a custom SQL query on the current relation | Loaders & pipeline plumbing |
@@ -397,6 +400,174 @@ A DuckJanitor instance.
 ```python
 >>> dj = DuckJanitor.from_sql("SELECT 1 AS a, 'x' AS b")
 >>> dj.collect()
+```
+
+
+
+<a id="asof_join"></a>
+### asof_join
+
+Join each row to the nearest eligible temporal row on the right.
+
+This is the DuckDB-backed equivalent of a pandas ``merge_asof`` and
+is useful for point-in-time analysis, slowly changing dimensions,
+event attribution, and temporal feature construction without leaking
+future values.
+
+```python
+asof_join(self, other: 'DuckJanitor', left_on: str, right_on: Optional[str] = None, by: Union[str, list[str], NoneType] = None, direction: str = 'backward', tolerance: Optional[Any] = None, suffixes: tuple[str, str] = ('', '_right'), keep_right_keys: bool = False) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **other** — DuckJanitor
+  The historical or reference relation to search.
+- **left_on** — str
+  Temporal column in the current relation.
+- **right_on** — str, optional
+  Temporal column in ``other``. Defaults to ``left_on``.
+- **by** — str or list of str, optional
+  Equality key(s) required in addition to the temporal condition.
+  For example, ``"employee_id"`` or ``["employee_id", "region"]``.
+- **direction** — {'backward', 'forward', 'nearest'}, default 'backward'
+  ``'backward'`` selects the latest right row at or before the left
+  time; ``'forward'`` selects the earliest row at or after it;
+  ``'nearest'`` selects the smallest absolute time distance and
+  breaks ties in favour of the earlier right timestamp.
+- **tolerance** — object, optional
+  Maximum allowed distance. Strings are interpreted as DuckDB
+  intervals, such as ``"7 days"``; numeric values are compared
+  directly for numeric temporal keys.
+- **suffixes** — tuple of str, default ('', '_right')
+  Suffixes applied when both relations contain a non-key column
+  with the same name.
+- **keep_right_keys** — bool, default False
+  Include the right equality and temporal key columns even when
+  they duplicate columns from the left relation.
+
+**Returns**
+
+DuckJanitor
+A left-preserving temporal join result.
+
+**Example** *(from docstring)*
+
+```python
+>>> events = DuckJanitor.from_pandas(pd.DataFrame({
+>>>     'employee_id': [1, 1],
+>>>     'event_time': pd.to_datetime(['2024-01-10', '2024-01-20']),
+>>> }))
+>>> history = DuckJanitor.from_pandas(pd.DataFrame({
+>>>     'employee_id': [1, 1],
+>>>     'effective_time': pd.to_datetime(['2024-01-01', '2024-01-15']),
+>>>     'manager': ['A', 'B'],
+>>> }))
+>>> events.asof_join(history, 'event_time', 'effective_time', by='employee_id').collect()['manager'].tolist()
+>>> ['A', 'B']
+```
+
+
+
+<a id="window_mutate"></a>
+### window_mutate
+
+Add one or more SQL window expressions to the relation.
+
+Expressions may be short function calls, which receive the shared
+``PARTITION BY`` / ``ORDER BY`` specification, or complete SQL
+expressions containing their own ``OVER (...)`` clause. This keeps
+common analytical windows concise while preserving access to DuckDB's
+full window-function syntax.
+
+```python
+window_mutate(self, expressions: dict[str, typing.Union[str, dict[str, typing.Any]]], partition_by: Union[str, list[str], NoneType] = None, order_by: Union[str, list[str], NoneType] = None, frame: Optional[str] = None) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **expressions** — dict[str, str or dict]
+  Mapping of output column names to SQL expressions. A dict value
+  may contain ``expression``, ``partition_by``, ``order_by``, and
+  ``frame`` to override the shared window specification.
+- **partition_by** — str or list[str], optional
+  Columns used to partition the shared window.
+- **order_by** — str or list[str], optional
+  Columns used to order the shared window.
+- **frame** — str, optional
+  A DuckDB frame clause such as ``"ROWS BETWEEN 3 PRECEDING AND
+  CURRENT ROW"``. Complete expressions with their own ``OVER``
+  clause ignore this shared frame.
+
+**Returns**
+
+DuckJanitor
+Self with the window-derived columns added or replaced.
+
+**Example** *(from docstring)*
+
+```python
+>>> events = DuckJanitor.from_pandas(pd.DataFrame({
+>>>     'employee_id': [1, 1, 1], 'score': [10, 20, 15],
+>>>     'event_time': pd.to_datetime(['2024-01-01', '2024-01-02', '2024-01-03']),
+>>> }))
+>>> events.window_mutate(
+>>>     {'previous_score': 'LAG(score)', 'rolling_score': 'AVG(score)'},
+>>>     partition_by='employee_id', order_by='event_time',
+>>>     frame='ROWS BETWEEN 1 PRECEDING AND CURRENT ROW',
+>>> ).collect()['previous_score'].tolist()
+>>> [<NA>, 10, 20]
+```
+
+
+
+<a id="recursive_cte"></a>
+### recursive_cte
+
+Execute a recursive CTE rooted in the current relation.
+
+The current relation is available as ``self`` in both SQL fragments.
+The recursive fragment may reference the CTE by ``name``. This is a
+flexible SQL-native primitive for hierarchy traversal, reachability,
+path enumeration, and cycle-aware graph analysis.
+
+```python
+recursive_cte(self, name: str, anchor: str, recursive: str, columns: Optional[list[str]] = None, union_all: bool = True) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **name** — str
+  CTE name referenced by the recursive fragment.
+- **anchor** — str
+  Non-recursive seed query. Use ``self`` for the current relation.
+- **recursive** — str
+  Recursive query. Reference ``name`` to walk prior results and
+  ``self`` to access the original relation.
+- **columns** — list[str], optional
+  Explicit CTE column names. Useful when the anchor uses computed
+  expressions or when stable names are important downstream.
+- **union_all** — bool, default True
+  Use ``UNION ALL`` (recommended for traversal) or ``UNION``.
+
+**Returns**
+
+DuckJanitor
+The rows produced by the recursive CTE.
+
+**Example** *(from docstring)*
+
+```python
+>>> org = DuckJanitor.from_pandas(pd.DataFrame({
+>>>     'employee_id': [1, 2, 3], 'manager_id': [None, 1, 2]
+>>> }))
+>>> tree = org.recursive_cte(
+>>>     'org_tree',
+>>>     'SELECT employee_id, manager_id, 0 AS depth FROM self WHERE manager_id IS NULL',
+>>>     'SELECT e.employee_id, e.manager_id, t.depth + 1 FROM self e '
+>>>     'JOIN org_tree t ON e.manager_id = t.employee_id',
+>>> )
+>>> tree.collect()['depth'].tolist()
+>>> [0, 1, 2]
 ```
 
 

@@ -972,6 +972,197 @@ class DuckJanitor:
         new_relation = self._connection.query(query)
         return DuckJanitor(new_relation, self._connection)
 
+    def window_mutate(
+        self,
+        expressions: dict[str, Union[str, dict[str, Any]]],
+        partition_by: Optional[Union[str, list[str]]] = None,
+        order_by: Optional[Union[str, list[str]]] = None,
+        frame: Optional[str] = None,
+    ) -> "DuckJanitor":
+        """Add one or more SQL window expressions to the relation.
+
+        Expressions may be short function calls, which receive the shared
+        ``PARTITION BY`` / ``ORDER BY`` specification, or complete SQL
+        expressions containing their own ``OVER (...)`` clause. This keeps
+        common analytical windows concise while preserving access to DuckDB's
+        full window-function syntax.
+
+        Parameters
+        ----------
+        expressions : dict[str, str or dict]
+            Mapping of output column names to SQL expressions. A dict value
+            may contain ``expression``, ``partition_by``, ``order_by``, and
+            ``frame`` to override the shared window specification.
+        partition_by : str or list[str], optional
+            Columns used to partition the shared window.
+        order_by : str or list[str], optional
+            Columns used to order the shared window.
+        frame : str, optional
+            A DuckDB frame clause such as ``"ROWS BETWEEN 3 PRECEDING AND
+            CURRENT ROW"``. Complete expressions with their own ``OVER``
+            clause ignore this shared frame.
+
+        Returns
+        -------
+        DuckJanitor
+            Self with the window-derived columns added or replaced.
+
+        Examples
+        --------
+        >>> events = DuckJanitor.from_pandas(pd.DataFrame({
+        ...     'employee_id': [1, 1, 1], 'score': [10, 20, 15],
+        ...     'event_time': pd.to_datetime(['2024-01-01', '2024-01-02', '2024-01-03']),
+        ... }))
+        >>> events.window_mutate(
+        ...     {'previous_score': 'LAG(score)', 'rolling_score': 'AVG(score)'},
+        ...     partition_by='employee_id', order_by='event_time',
+        ...     frame='ROWS BETWEEN 1 PRECEDING AND CURRENT ROW',
+        ... ).collect()['previous_score'].tolist()
+        [<NA>, 10, 20]
+        """
+        if not expressions:
+            raise ValueError("window_mutate(): expressions must not be empty")
+
+        def normalize_columns(value, label):
+            columns = [value] if isinstance(value, str) else list(value or [])
+            for column in columns:
+                if column not in self._relation.columns:
+                    raise ValueError(f"window_mutate(): {label} column {column!r} not found")
+            return columns
+
+        shared_partition = normalize_columns(partition_by, "partition_by")
+        shared_order = normalize_columns(order_by, "order_by")
+        temp_name = f"_window_{id(self._relation)}"
+        self._connection.register(temp_name, self._relation)
+
+        output_names = set(self._relation.columns)
+        select_columns = []
+        for column in self._relation.columns:
+            if column not in expressions:
+                select_columns.append(self._quote(column))
+        expression_sql = []
+        for name, specification in expressions.items():
+            if not isinstance(name, str) or not name:
+                raise ValueError("window_mutate(): expression names must be non-empty strings")
+            if isinstance(specification, str):
+                expression = specification
+                partition = shared_partition
+                ordering = shared_order
+                expression_frame = frame
+            elif isinstance(specification, dict):
+                expression = specification.get("expression")
+                if not isinstance(expression, str) or not expression.strip():
+                    raise ValueError(f"window_mutate(): {name!r} needs a non-empty expression")
+                partition = normalize_columns(
+                    specification.get("partition_by", shared_partition), "partition_by"
+                )
+                ordering = normalize_columns(
+                    specification.get("order_by", shared_order), "order_by"
+                )
+                expression_frame = specification.get("frame", frame)
+            else:
+                raise TypeError(
+                    f"window_mutate(): {name!r} must be a SQL string or specification dict"
+                )
+
+            if not expression.strip():
+                raise ValueError(f"window_mutate(): {name!r} expression must not be empty")
+            if re.search(r"\bOVER\s*\(", expression, flags=re.IGNORECASE):
+                window_expression = expression
+            else:
+                clauses = []
+                if partition:
+                    clauses.append("PARTITION BY " + ", ".join(self._quote(c) for c in partition))
+                if ordering:
+                    clauses.append("ORDER BY " + ", ".join(self._quote(c) for c in ordering))
+                if expression_frame:
+                    clauses.append(str(expression_frame))
+                window_expression = f"{expression} OVER ({' '.join(clauses)})"
+            expression_sql.append(f"{window_expression} AS {self._quote(name)}")
+            output_names.add(name)
+
+        query = (
+            f"SELECT {', '.join(select_columns + expression_sql)} "
+            f'FROM (SELECT *, row_number() OVER () AS "__dj_window_row" '
+            f"FROM {self._quote(temp_name)}) window_source "
+            f'ORDER BY "__dj_window_row"'
+        )
+        return DuckJanitor(self._connection.query(query), self._connection)
+
+    def recursive_cte(
+        self,
+        name: str,
+        anchor: str,
+        recursive: str,
+        columns: Optional[list[str]] = None,
+        union_all: bool = True,
+    ) -> "DuckJanitor":
+        """Execute a recursive CTE rooted in the current relation.
+
+        The current relation is available as ``self`` in both SQL fragments.
+        The recursive fragment may reference the CTE by ``name``. This is a
+        flexible SQL-native primitive for hierarchy traversal, reachability,
+        path enumeration, and cycle-aware graph analysis.
+
+        Parameters
+        ----------
+        name : str
+            CTE name referenced by the recursive fragment.
+        anchor : str
+            Non-recursive seed query. Use ``self`` for the current relation.
+        recursive : str
+            Recursive query. Reference ``name`` to walk prior results and
+            ``self`` to access the original relation.
+        columns : list[str], optional
+            Explicit CTE column names. Useful when the anchor uses computed
+            expressions or when stable names are important downstream.
+        union_all : bool, default True
+            Use ``UNION ALL`` (recommended for traversal) or ``UNION``.
+
+        Returns
+        -------
+        DuckJanitor
+            The rows produced by the recursive CTE.
+
+        Examples
+        --------
+        >>> org = DuckJanitor.from_pandas(pd.DataFrame({
+        ...     'employee_id': [1, 2, 3], 'manager_id': [None, 1, 2]
+        ... }))
+        >>> tree = org.recursive_cte(
+        ...     'org_tree',
+        ...     'SELECT employee_id, manager_id, 0 AS depth FROM self WHERE manager_id IS NULL',
+        ...     'SELECT e.employee_id, e.manager_id, t.depth + 1 FROM self e '
+        ...     'JOIN org_tree t ON e.manager_id = t.employee_id',
+        ... )
+        >>> tree.collect()['depth'].tolist()
+        [0, 1, 2]
+        """
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            raise ValueError("recursive_cte(): name must be a valid SQL identifier")
+        if not isinstance(anchor, str) or not anchor.strip():
+            raise ValueError("recursive_cte(): anchor must be a non-empty SQL query")
+        if not isinstance(recursive, str) or not recursive.strip():
+            raise ValueError("recursive_cte(): recursive must be a non-empty SQL query")
+        if columns is not None:
+            if not columns or any(not isinstance(column, str) or not column for column in columns):
+                raise ValueError("recursive_cte(): columns must contain non-empty names")
+            column_sql = "(" + ", ".join(self._quote(column) for column in columns) + ")"
+        else:
+            column_sql = ""
+
+        temp_name = f"_recursive_{id(self._relation)}"
+        self._connection.register(temp_name, self._relation)
+        anchor_sql = re.sub(r"\bself\b", self._quote(temp_name), anchor)
+        recursive_sql = re.sub(r"\bself\b", self._quote(temp_name), recursive)
+        operator = "UNION ALL" if union_all else "UNION"
+        query = (
+            f"WITH RECURSIVE {self._quote(name)}{column_sql} AS ("
+            f"{anchor_sql} {operator} {recursive_sql}) "
+            f"SELECT * FROM {self._quote(name)}"
+        )
+        return DuckJanitor(self._connection.query(query), self._connection)
+
     def bin_numeric(
         self,
         column: str,
@@ -1419,6 +1610,197 @@ class DuckJanitor:
         from .cleaning_ops_final import conditional_join as _conditional_join
 
         new_relation = _conditional_join(self._relation, other._relation, on, how, self._connection)
+        return DuckJanitor(new_relation, self._connection)
+
+    def asof_join(
+        self,
+        other: "DuckJanitor",
+        left_on: str,
+        right_on: Optional[str] = None,
+        by: Optional[Union[str, list[str]]] = None,
+        direction: str = "backward",
+        tolerance: Optional[Any] = None,
+        suffixes: tuple[str, str] = ("", "_right"),
+        keep_right_keys: bool = False,
+    ) -> "DuckJanitor":
+        """Join each row to the nearest eligible temporal row on the right.
+
+        This is the DuckDB-backed equivalent of a pandas ``merge_asof`` and
+        is useful for point-in-time analysis, slowly changing dimensions,
+        event attribution, and temporal feature construction without leaking
+        future values.
+
+        Parameters
+        ----------
+        other : DuckJanitor
+            The historical or reference relation to search.
+        left_on : str
+            Temporal column in the current relation.
+        right_on : str, optional
+            Temporal column in ``other``. Defaults to ``left_on``.
+        by : str or list of str, optional
+            Equality key(s) required in addition to the temporal condition.
+            For example, ``"employee_id"`` or ``["employee_id", "region"]``.
+        direction : {'backward', 'forward', 'nearest'}, default 'backward'
+            ``'backward'`` selects the latest right row at or before the left
+            time; ``'forward'`` selects the earliest row at or after it;
+            ``'nearest'`` selects the smallest absolute time distance and
+            breaks ties in favour of the earlier right timestamp.
+        tolerance : object, optional
+            Maximum allowed distance. Strings are interpreted as DuckDB
+            intervals, such as ``"7 days"``; numeric values are compared
+            directly for numeric temporal keys.
+        suffixes : tuple of str, default ('', '_right')
+            Suffixes applied when both relations contain a non-key column
+            with the same name.
+        keep_right_keys : bool, default False
+            Include the right equality and temporal key columns even when
+            they duplicate columns from the left relation.
+
+        Returns
+        -------
+        DuckJanitor
+            A left-preserving temporal join result.
+
+        Examples
+        --------
+        >>> events = DuckJanitor.from_pandas(pd.DataFrame({
+        ...     'employee_id': [1, 1],
+        ...     'event_time': pd.to_datetime(['2024-01-10', '2024-01-20']),
+        ... }))
+        >>> history = DuckJanitor.from_pandas(pd.DataFrame({
+        ...     'employee_id': [1, 1],
+        ...     'effective_time': pd.to_datetime(['2024-01-01', '2024-01-15']),
+        ...     'manager': ['A', 'B'],
+        ... }))
+        >>> events.asof_join(history, 'event_time', 'effective_time', by='employee_id').collect()['manager'].tolist()
+        ['A', 'B']
+        """
+        if not isinstance(other, DuckJanitor):
+            raise TypeError("other must be a DuckJanitor instance")
+        if not isinstance(left_on, str) or not left_on:
+            raise ValueError("left_on must be a non-empty column name")
+        right_on = right_on or left_on
+        if not isinstance(right_on, str) or not right_on:
+            raise ValueError("right_on must be a non-empty column name")
+        if direction not in {"backward", "forward", "nearest"}:
+            raise ValueError("direction must be 'backward', 'forward', or 'nearest'")
+        if len(suffixes) != 2:
+            raise ValueError("suffixes must contain exactly two strings")
+
+        left_columns = list(self._relation.columns)
+        right_columns = list(other._relation.columns)
+        if left_on not in left_columns:
+            raise ValueError(f"asof_join(): left_on {left_on!r} not in current columns")
+        if right_on not in right_columns:
+            raise ValueError(f"asof_join(): right_on {right_on!r} not in other columns")
+
+        by_columns = [by] if isinstance(by, str) else list(by or [])
+        for column in by_columns:
+            if column not in left_columns:
+                raise ValueError(f"asof_join(): by column {column!r} not in current columns")
+            if column not in right_columns:
+                raise ValueError(f"asof_join(): by column {column!r} not in other columns")
+
+        left_name = f"_asof_left_{id(self._relation)}"
+        right_name = f"_asof_right_{id(other._relation)}"
+        self._connection.register(left_name, self._relation)
+        try:
+            self._connection.register(right_name, other._relation)
+        except Exception:
+            self._connection.register(right_name, other._relation.df())
+
+        left_id = "__dj_asof_left_id"
+        right_id = "__dj_asof_right_id"
+        left_type = str(self._relation.types[left_columns.index(left_on)]).upper()
+        right_type = str(other._relation.types[right_columns.index(right_on)]).upper()
+        temporal_types = ("DATE", "TIME", "TIMESTAMP", "INTERVAL")
+        temporal_distance = any(
+            marker in left_type or marker in right_type for marker in temporal_types
+        )
+        left_cte = f"SELECT *, row_number() OVER () AS {self._quote(left_id)} FROM {self._quote(left_name)}"
+        right_cte = f"SELECT *, row_number() OVER () AS {self._quote(right_id)} FROM {self._quote(right_name)}"
+        equality = " AND ".join(
+            f"l.{self._quote(column)} = r.{self._quote(column)}" for column in by_columns
+        )
+        if equality:
+            equality += " AND "
+
+        if direction == "backward":
+            temporal_condition = f"l.{self._quote(left_on)} >= r.{self._quote(right_on)}"
+            order = f"r.{self._quote(right_on)} DESC, r.{self._quote(right_id)} DESC"
+        elif direction == "forward":
+            temporal_condition = f"l.{self._quote(left_on)} <= r.{self._quote(right_on)}"
+            order = f"r.{self._quote(right_on)} ASC, r.{self._quote(right_id)} ASC"
+        else:
+            temporal_condition = "TRUE"
+            if temporal_distance:
+                distance_order = (
+                    f"abs(epoch(l.{self._quote(left_on)}) - epoch(r.{self._quote(right_on)}))"
+                )
+            else:
+                distance_order = f"abs(l.{self._quote(left_on)} - r.{self._quote(right_on)})"
+            order = (
+                f"{distance_order} ASC, r.{self._quote(right_on)} ASC, "
+                f"r.{self._quote(right_id)} ASC"
+            )
+
+        if direction != "nearest":
+            distance = f"(l.{self._quote(left_on)} - r.{self._quote(right_on)})"
+        elif temporal_distance:
+            distance = f"abs(epoch(l.{self._quote(left_on)}) - epoch(r.{self._quote(right_on)}))"
+        else:
+            distance = f"abs(l.{self._quote(left_on)} - r.{self._quote(right_on)})"
+        if tolerance is not None:
+            if isinstance(tolerance, str):
+                tolerance_sql = f"CAST({self._sql_value(tolerance)} AS INTERVAL)"
+            else:
+                tolerance_sql = self._sql_value(tolerance)
+            if direction == "backward":
+                tolerance_condition = f"AND {distance} <= {tolerance_sql}"
+            elif direction == "forward":
+                tolerance_condition = f"AND {distance} >= -{tolerance_sql} AND {distance} <= 0"
+            else:
+                tolerance_condition = f"AND {distance} <= {tolerance_sql}"
+        else:
+            tolerance_condition = ""
+
+        left_output = []
+        output_names = []
+        for column in left_columns:
+            name = column + suffixes[0] if column in right_columns and suffixes[0] else column
+            if name in output_names:
+                raise ValueError(f"asof_join(): duplicate output column {name!r}")
+            output_names.append(name)
+            left_output.append(f"l.{self._quote(column)} AS {self._quote(name)}")
+
+        right_keys = set(by_columns + [right_on])
+        right_output = []
+        for column in right_columns:
+            if column in right_keys and not keep_right_keys:
+                continue
+            name = column + suffixes[1] if column in left_columns else column
+            if name in output_names:
+                raise ValueError(f"asof_join(): duplicate output column {name!r}")
+            output_names.append(name)
+            right_output.append(f"r.{self._quote(column)} AS {self._quote(name)}")
+
+        projection = ", ".join(left_output + right_output)
+        query = f"""
+            WITH l AS ({left_cte}), r AS ({right_cte}), ranked AS (
+                SELECT {projection}, l.{self._quote(left_id)} AS {self._quote(left_id)},
+                       row_number() OVER (
+                           PARTITION BY l.{self._quote(left_id)} ORDER BY {order}
+                       ) AS __dj_asof_rank
+                FROM l
+                LEFT JOIN r ON {equality}{temporal_condition} {tolerance_condition}
+            )
+            SELECT {", ".join(self._quote(name) for name in output_names)}
+            FROM ranked
+            WHERE __dj_asof_rank = 1
+            ORDER BY {self._quote(left_id)}
+        """
+        new_relation = self._connection.query(query)
         return DuckJanitor(new_relation, self._connection)
 
     def get_dupes(self, columns: Optional[Union[str, list[str]]] = None) -> "DuckJanitor":

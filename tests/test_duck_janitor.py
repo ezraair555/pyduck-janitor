@@ -974,3 +974,133 @@ class TestDuckJanitor:
 
         with pytest.raises(ValueError, match="non-empty SQL string"):
             DuckJanitor.from_database(connection, "   ")
+
+    def test_asof_join_backward_forward_and_nearest(self):
+        """asof_join should support each temporal matching direction."""
+        events = DuckJanitor.from_pandas(
+            pd.DataFrame(
+                {
+                    "employee_id": [1, 1, 1],
+                    "event_time": pd.to_datetime(["2024-01-10", "2024-01-12", "2024-01-20"]),
+                }
+            )
+        )
+        history = DuckJanitor.from_pandas(
+            pd.DataFrame(
+                {
+                    "employee_id": [1, 1],
+                    "effective_time": pd.to_datetime(["2024-01-01", "2024-01-15"]),
+                    "manager": ["A", "B"],
+                }
+            )
+        )
+
+        assert events.asof_join(
+            history, "event_time", "effective_time", by="employee_id"
+        ).collect()["manager"].tolist() == ["A", "A", "B"]
+        assert events.asof_join(
+            history, "event_time", "effective_time", by="employee_id", direction="forward"
+        ).collect()["manager"].tolist() == ["B", "B", None]
+        assert events.asof_join(
+            history, "event_time", "effective_time", by="employee_id", direction="nearest"
+        ).collect()["manager"].tolist() == ["B", "B", "B"]
+
+    def test_asof_join_tolerance_and_suffixes(self):
+        """asof_join should enforce tolerance and disambiguate output columns."""
+        left = DuckJanitor.from_pandas(
+            pd.DataFrame(
+                {
+                    "employee_id": [1],
+                    "event_time": pd.to_datetime(["2024-01-20"]),
+                    "value": [100],
+                }
+            )
+        )
+        right = DuckJanitor.from_pandas(
+            pd.DataFrame(
+                {
+                    "employee_id": [1],
+                    "effective_time": pd.to_datetime(["2024-01-01"]),
+                    "value": [10],
+                }
+            )
+        )
+
+        result = left.asof_join(
+            right,
+            "event_time",
+            "effective_time",
+            by="employee_id",
+            tolerance="7 days",
+            suffixes=("_event", "_history"),
+        ).collect()
+
+        assert result["value_event"].tolist() == [100]
+        assert pd.isna(result["value_history"].iloc[0])
+
+    def test_asof_join_nearest_numeric_keys(self):
+        """nearest ASOF matching should also support numeric time keys."""
+        left = DuckJanitor.from_pandas(pd.DataFrame({"id": [1, 2], "position": [10, 28]}))
+        right = DuckJanitor.from_pandas(
+            pd.DataFrame({"id": [1, 1, 2], "position": [8, 13, 30], "label": ["a", "b", "c"]})
+        )
+
+        result = left.asof_join(right, "position", by="id", direction="nearest").collect()
+
+        assert result["label"].tolist() == ["a", "c"]
+
+    def test_window_mutate_shared_and_custom_windows(self):
+        """window_mutate should build shared and per-expression windows."""
+        events = DuckJanitor.from_pandas(
+            pd.DataFrame(
+                {
+                    "employee_id": [1, 1, 1],
+                    "event_time": pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"]),
+                    "score": [10, 20, 15],
+                }
+            )
+        )
+
+        result = events.window_mutate(
+            {
+                "previous_score": "LAG(score)",
+                "running_score": "AVG(score)",
+                "overall_rank": {"expression": "ROW_NUMBER()", "order_by": ["score"]},
+            },
+            partition_by="employee_id",
+            order_by="event_time",
+            frame="ROWS BETWEEN 1 PRECEDING AND CURRENT ROW",
+        ).collect()
+
+        assert pd.isna(result["previous_score"].iloc[0])
+        assert result["previous_score"].iloc[1:].tolist() == [10, 20]
+        assert result["running_score"].tolist() == [10.0, 15.0, 17.5]
+        assert sorted(result["overall_rank"].tolist()) == [1, 2, 3]
+
+    def test_recursive_cte_traverses_hierarchy(self):
+        """recursive_cte should expose the current relation as self."""
+        org = DuckJanitor.from_pandas(
+            pd.DataFrame(
+                {
+                    "employee_id": [1, 2, 3],
+                    "manager_id": [None, 1, 2],
+                }
+            )
+        )
+
+        tree = org.recursive_cte(
+            "org_tree",
+            "SELECT employee_id, manager_id, 0 AS depth FROM self WHERE manager_id IS NULL",
+            "SELECT e.employee_id, e.manager_id, t.depth + 1 "
+            "FROM self e JOIN org_tree t ON e.manager_id = t.employee_id",
+        ).collect()
+
+        assert tree["employee_id"].tolist() == [1, 2, 3]
+        assert tree["depth"].tolist() == [0, 1, 2]
+
+    def test_recursive_cte_validates_name(self, sample_data):
+        """recursive_cte should reject unsafe CTE names."""
+        with pytest.raises(ValueError, match="valid SQL identifier"):
+            DuckJanitor.from_pandas(sample_data).recursive_cte(
+                "tree; DROP TABLE users", "SELECT * FROM self", "SELECT * FROM tree"
+            )

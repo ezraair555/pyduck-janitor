@@ -218,6 +218,9 @@ These were added in v0.2.0 to reach 100% coverage of pyjanitor's documented API.
 These are the only truly *new* methods (no pyjanitor counterpart) — they exist because the backend is a live DuckDB connection rather than a pandas DataFrame:
 
 - [`from_pandas()`](docs/api/functions.md#from_pandas), [`from_csv()`](docs/api/functions.md#from_csv), [`from_excel()`](docs/api/functions.md#from_excel), [`from_json()`](docs/api/functions.md#from_json), [`from_parquet()`](docs/api/functions.md#from_parquet), [`from_database()`](docs/api/functions.md#from_database), [`from_sql()`](docs/api/functions.md#from_sql) - Data source loaders
+- [`asof_join()`](docs/api/functions.md#asof_join) - Point-in-time temporal joins with backward, forward, nearest, key, and tolerance matching
+- [`window_mutate()`](docs/api/functions.md#window_mutate) - Composable partitioned, ordered, framed window expressions
+- [`recursive_cte()`](docs/api/functions.md#recursive_cte) - Recursive hierarchy, path, and reachability queries rooted in the current relation
 - [`sql()`](docs/api/functions.md#sql) - Escape hatch: raw SQL against the current relation (use `self` as the table name)
 - [`explain()`](docs/api/functions.md#explain) - EXPLAIN plan for the current pipeline
 - [`collect()`](docs/api/functions.md#collect) / [`head()`](docs/api/functions.md#head) - Materialize to pandas / preview rows
@@ -236,6 +239,63 @@ pyduck-janitor can work with data from:
 - **DuckDB databases** - Existing `.duckdb` files
 - **SQL queries** - Custom SQL as input
 - **External SQL databases** - Any open DB-API 2.0 connection, including Vertica and Microsoft SQL Server
+
+### Point-in-time joins
+
+Use `asof_join()` to attach the latest historical record at or before an
+event, the next record after an event, or the closest record in time. It is
+designed for effective-dated employee attributes, manager history,
+compensation snapshots, market data, and point-in-time feature construction.
+
+```python
+matched = events.asof_join(
+    manager_history,
+    left_on="event_time",
+    right_on="effective_time",
+    by=["employee_id", "department"],
+    direction="backward",
+    tolerance="90 days",
+)
+```
+
+`asof_join()` preserves every left row, supports `backward`, `forward`, and
+`nearest` matching, applies optional equality keys and tolerances, and keeps
+duplicate timestamp selection deterministic.
+
+### Windows and recursive graph queries
+
+Use `window_mutate()` for reusable analytical windows without writing the
+surrounding registration and projection SQL yourself:
+
+```python
+scored = events.window_mutate(
+    {
+        "previous_score": "LAG(score)",
+        "rolling_score": "AVG(score)",
+        "event_rank": "ROW_NUMBER()",
+    },
+    partition_by="employee_id",
+    order_by="event_time",
+    frame="ROWS BETWEEN 3 PRECEDING AND CURRENT ROW",
+)
+```
+
+Use `recursive_cte()` for manager trees, ancestor/descendant paths, and
+reachability. The current relation is available as `self`, and the recursive
+query references the CTE by its supplied name:
+
+```python
+tree = org.recursive_cte(
+    "org_tree",
+    "SELECT employee_id, manager_id, 0 AS depth "
+    "FROM self WHERE manager_id IS NULL",
+    "SELECT e.employee_id, e.manager_id, t.depth + 1 "
+    "FROM self e JOIN org_tree t ON e.manager_id = t.employee_id",
+)
+```
+
+Together with `asof_join()`, these primitives support point-in-time
+organizational hierarchy analysis while keeping the computation in DuckDB.
 
 ### External database connections
 
