@@ -1116,6 +1116,158 @@ class DuckJanitor:
             for name in names
         }
 
+    def diff(
+        self,
+        other: "DuckJanitor",
+        keys: Union[str, list[str]],
+        *,
+        columns: Optional[list[str]] = None,
+        ignore: Optional[list[str]] = None,
+        context: Optional[list[str]] = None,
+        numeric_tolerance: Optional[float] = None,
+        timestamp_precision: Optional[str] = None,
+        require_matching_columns: bool = True,
+        upcast_types: bool = False,
+        null_equals_empty: bool = False,
+        prefix: str = "diff_",
+        auto_install: bool = False,
+    ) -> "DuckJanitor":
+        """Compare this relation with another using ``duck_diff``.
+
+        Parameters
+        ----------
+        other : DuckJanitor
+            The relation to compare against the current relation.
+        keys : str or list[str]
+            Primary-key column or composite primary key.
+        columns, ignore, context : list[str], optional
+            Columns to compare, exclude, or expose without comparing.
+        numeric_tolerance : float, optional
+            Absolute tolerance for numeric comparisons.
+        timestamp_precision : str, optional
+            Precision used to truncate timestamps before comparing.
+        require_matching_columns : bool, default True
+            Require matching names and types on both sides.
+        upcast_types : bool, default False
+            Reconcile compatible type differences when matching columns are
+            not required.
+        null_equals_empty : bool, default False
+            Treat NULL and the empty string as equal for VARCHAR values.
+        prefix : str, default ``"diff_"``
+            Prefix for the extension's status and data columns.
+        auto_install : bool, default False
+            Install ``duck_diff`` from DuckDB's community repository if needed.
+
+        Returns
+        -------
+        DuckJanitor
+            One row per distinct key with row and column-level diff status.
+        """
+        return self._duck_diff(
+            other,
+            "table_diff",
+            keys,
+            columns=columns,
+            ignore=ignore,
+            context=context,
+            numeric_tolerance=numeric_tolerance,
+            timestamp_precision=timestamp_precision,
+            require_matching_columns=require_matching_columns,
+            upcast_types=upcast_types,
+            null_equals_empty=null_equals_empty,
+            prefix=prefix,
+            auto_install=auto_install,
+        )
+
+    def diff_summary(
+        self,
+        other: "DuckJanitor",
+        keys: Union[str, list[str]],
+        *,
+        columns: Optional[list[str]] = None,
+        ignore: Optional[list[str]] = None,
+        numeric_tolerance: Optional[float] = None,
+        timestamp_precision: Optional[str] = None,
+        require_matching_columns: bool = True,
+        upcast_types: bool = False,
+        null_equals_empty: bool = False,
+        auto_install: bool = False,
+    ) -> "DuckJanitor":
+        """Return aggregate counts from a ``duck_diff`` comparison."""
+        return self._duck_diff(
+            other,
+            "table_diff_summary",
+            keys,
+            columns=columns,
+            ignore=ignore,
+            numeric_tolerance=numeric_tolerance,
+            timestamp_precision=timestamp_precision,
+            require_matching_columns=require_matching_columns,
+            upcast_types=upcast_types,
+            null_equals_empty=null_equals_empty,
+            auto_install=auto_install,
+        )
+
+    def schema_diff(
+        self,
+        other: "DuckJanitor",
+        *,
+        auto_install: bool = False,
+    ) -> "DuckJanitor":
+        """Compare the column names and types of two relations."""
+        if not isinstance(other, DuckJanitor):
+            raise TypeError("schema_diff(): other must be a DuckJanitor")
+        self.load_extension("duck_diff", auto_install=auto_install)
+        left_name, right_name = self._register_diff_sources(other)
+        query = (
+            "SELECT * FROM schema_diff("
+            f"{self._sql_value(f'FROM {self._quote(left_name)}')}, "
+            f"{self._sql_value(f'FROM {self._quote(right_name)}')})"
+        )
+        return DuckJanitor(self._connection.query(query), self._connection)
+
+    def _duck_diff(
+        self,
+        other: "DuckJanitor",
+        function: str,
+        keys: Union[str, list[str]],
+        **options: Any,
+    ) -> "DuckJanitor":
+        if not isinstance(other, DuckJanitor):
+            raise TypeError(f"{function}(): other must be a DuckJanitor")
+        key_list = [keys] if isinstance(keys, str) else list(keys)
+        if not key_list or any(not isinstance(key, str) or not key for key in key_list):
+            raise ValueError(f"{function}(): keys must contain at least one column name")
+        if function not in {"table_diff", "table_diff_summary"}:
+            raise ValueError(f"Unsupported duck_diff function: {function}")
+
+        self.load_extension("duck_diff", auto_install=options.pop("auto_install", False))
+        left_name, right_name = self._register_diff_sources(other)
+        arguments = [
+            self._sql_value(f"FROM {self._quote(left_name)}"),
+            self._sql_value(f"FROM {self._quote(right_name)}"),
+            f"pk := {self._sql_list(key_list)}",
+        ]
+        for name, value in options.items():
+            if value is None:
+                continue
+            if name in {"columns", "ignore", "context"}:
+                arguments.append(f"{name} := {self._sql_list(value)}")
+            else:
+                arguments.append(f"{name} := {self._sql_value(value)}")
+        query = f"SELECT * FROM {function}({', '.join(arguments)})"
+        return DuckJanitor(self._connection.query(query), self._connection)
+
+    def _register_diff_sources(self, other: "DuckJanitor") -> tuple[str, str]:
+        left_name = f"_duck_diff_left_{id(self._relation)}"
+        right_name = f"_duck_diff_right_{id(other._relation)}"
+        self._connection.register(left_name, self._relation)
+        try:
+            self._connection.register(right_name, other._relation)
+        except Exception:
+            self._connection.register(right_name, other.collect())
+        return left_name, right_name
+
     def window_mutate(
         self,
         expressions: dict[str, Union[str, dict[str, Any]]],
@@ -2810,6 +2962,11 @@ class DuckJanitor:
             return repr(v)
         escaped = str(v).replace("'", "''")
         return f"'{escaped}'"
+
+    @classmethod
+    def _sql_list(cls, values) -> str:
+        """Render a list of scalar values for DuckDB named arguments."""
+        return "[" + ", ".join(cls._sql_value(value) for value in values) + "]"
 
     # =============================================================
     # pyjanitor parity batch: small DuckDB-trivial helpers

@@ -58,6 +58,10 @@ graph = [
     # Onager is installed at runtime from DuckDB's community repository.
     "duckdb>=1.5.5,<1.6",
 ]
+diff = [
+    # duck_diff is installed at runtime from DuckDB's community repository.
+    "duckdb>=1.5.5,<1.6",
+]
 text = [
     # icu + fts ship with the DuckDB Python wheel; this extra is a
     # no-op placeholder kept for install-command stability.

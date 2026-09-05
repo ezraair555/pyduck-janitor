@@ -28,3 +28,16 @@ def test_onager_install_uses_community_repository(monkeypatch):
     load_extension(FakeConnection(), "onager")
 
     assert statements == ["INSTALL onager FROM community", "LOAD onager"]
+
+
+def test_duck_diff_install_uses_community_repository(monkeypatch):
+    statements = []
+
+    class FakeConnection:
+        def execute(self, statement):
+            statements.append(statement)
+
+    monkeypatch.delenv("PYDUCK_SKIP_EXTENSIONS", raising=False)
+    load_extension(FakeConnection(), "duck_diff")
+
+    assert statements == ["INSTALL duck_diff FROM community", "LOAD duck_diff"]

@@ -40,9 +40,10 @@ EXTENSIONS: dict[str, tuple[str, str]] = {
     "vss": ("vss", "vss"),
     "json": ("json", "json"),
     "onager": ("graph", "onager"),
+    "duck_diff": ("diff", "duck_diff"),
 }
 
-_COMMUNITY_EXTENSIONS = {"onager"}
+_COMMUNITY_EXTENSIONS = {"onager", "duck_diff"}
 
 
 class ExtensionNotAvailable(RuntimeError):

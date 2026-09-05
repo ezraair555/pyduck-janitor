@@ -4,6 +4,7 @@ Tests for DuckJanitor class.
 
 import sqlite3
 
+import duckdb
 import pandas as pd
 import pytest
 from pyduck_janitor import DuckJanitor
@@ -72,6 +73,23 @@ class TestDuckJanitor:
 
         with pytest.raises(ValueError, match="Unknown graph algorithms"):
             dj.graph_analyze("source", "target", "not_an_algorithm")
+
+    def test_diff_builds_duck_diff_query(self, monkeypatch):
+        conn = duckdb.connect()
+        conn.execute(
+            "CREATE MACRO table_diff(left_query, right_query, pk, "
+            "require_matching_columns := true, upcast_types := false, "
+            "null_equals_empty := false, prefix := 'diff_') AS TABLE "
+            "SELECT 1 AS id, 'different' AS diff_status"
+        )
+        left = DuckJanitor(conn.from_df(pd.DataFrame({"id": [1], "score": [10]})), conn)
+        right = DuckJanitor(conn.from_df(pd.DataFrame({"id": [1], "score": [12]})), conn)
+
+        monkeypatch.setattr(DuckJanitor, "load_extension", lambda *args, **kwargs: None)
+        result = left.diff(right, keys="id")
+
+        assert result.collect().iloc[0]["diff_status"] == "different"
+        conn.close()
 
     def test_from_excel(self, tmp_path):
         """Test creating DuckJanitor from an Excel file."""

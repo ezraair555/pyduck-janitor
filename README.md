@@ -278,6 +278,35 @@ Onager is intentionally not imported at package import time and is not a
 hard dependency. DuckGQL remains a separate optional graph-querying adapter;
 Onager is for graph algorithms and network metrics.
 
+### Optional snapshot diffs with duck_diff
+
+Install the diff extra when you need keyed, row-level, and column-level
+comparisons between snapshots:
+
+```bash
+pip install "pyduck-janitor[diff]"
+```
+
+```python
+changes = current.diff(
+    prior,
+    keys=["employee_id"],
+    columns=["department", "manager_id", "job_level", "salary"],
+    numeric_tolerance=0.01,
+    auto_install=True,
+)
+
+changed = changes.filter_on("diff_status = 'different'").collect()
+summary = current.diff_summary(prior, keys=["employee_id"], auto_install=True).collect()
+schema = current.schema_diff(prior, auto_install=True).collect()
+```
+
+`diff()` returns row status, JSON change details, and typed left/right values;
+`diff_summary()` returns counts and percentages; `schema_diff()` compares
+column names and types. The adapter uses `INSTALL duck_diff FROM community`
+only when `auto_install=True`, and targets DuckDB `1.5.x` because native
+extension binaries are version-specific.
+
 Plus the pandas-flavored bases that pyjanitor implements differently and pyduck implements natively (comparable intent, DuckDB-native implementation — documented in the module tables above): [`dropna`](docs/api/functions.md#dropna), [`fill`](docs/api/functions.md#fill), [`filter_column`](docs/api/functions.md#filter_column), [`convert_date`](docs/api/functions.md#convert_date), [`truncate_datetime`](docs/api/functions.md#truncate_datetime), [`get_dummies`](docs/api/functions.md#get_dummies).
 
 ## Supported Data Sources

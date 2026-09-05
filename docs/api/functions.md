@@ -23,6 +23,9 @@ Complete function-by-function reference for every public method on
 | [`load_extension`](#load_extension) | Load an optional DuckDB extension for this pipeline | Loaders & pipeline plumbing |
 | [`graph_algorithm`](#graph_algorithm) | Run an Onager graph table function over the current relation | Loaders & pipeline plumbing |
 | [`graph_analyze`](#graph_analyze) | Run common Onager graph algorithms over an edge relation | Loaders & pipeline plumbing |
+| [`diff`](#diff) | Compare this relation with another using ``duck_diff`` | Loaders & pipeline plumbing |
+| [`diff_summary`](#diff_summary) | Return aggregate counts from a ``duck_diff`` comparison | Loaders & pipeline plumbing |
+| [`schema_diff`](#schema_diff) | Compare the column names and types of two relations | Loaders & pipeline plumbing |
 | [`asof_join`](#asof_join) | Join each row to the nearest eligible temporal row on the right | Loaders & pipeline plumbing |
 | [`window_mutate`](#window_mutate) | Add one or more SQL window expressions to the relation | Loaders & pipeline plumbing |
 | [`recursive_cte`](#recursive_cte) | Execute a recursive CTE rooted in the current relation | Loaders & pipeline plumbing |
@@ -492,6 +495,74 @@ graph_analyze(self, source: str, target: str, algorithms: Union[str, list[str]],
 dict[str, DuckJanitor]
 One result relation per requested algorithm, keyed by the public
 algorithm name.
+
+_No example available._
+
+
+
+<a id="diff"></a>
+### diff
+
+Compare this relation with another using ``duck_diff``.
+
+```python
+diff(self, other: 'DuckJanitor', keys: Union[str, list[str]], *, columns: Optional[list[str]] = None, ignore: Optional[list[str]] = None, context: Optional[list[str]] = None, numeric_tolerance: Optional[float] = None, timestamp_precision: Optional[str] = None, require_matching_columns: bool = True, upcast_types: bool = False, null_equals_empty: bool = False, prefix: str = 'diff_', auto_install: bool = False) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **other** — DuckJanitor
+  The relation to compare against the current relation.
+- **keys** — str or list[str]
+  Primary-key column or composite primary key.
+  columns, ignore, context : list[str], optional
+  Columns to compare, exclude, or expose without comparing.
+- **numeric_tolerance** — float, optional
+  Absolute tolerance for numeric comparisons.
+- **timestamp_precision** — str, optional
+  Precision used to truncate timestamps before comparing.
+- **require_matching_columns** — bool, default True
+  Require matching names and types on both sides.
+- **upcast_types** — bool, default False
+  Reconcile compatible type differences when matching columns are
+  not required.
+- **null_equals_empty** — bool, default False
+  Treat NULL and the empty string as equal for VARCHAR values.
+- **prefix** — str, default ``"diff_"``
+  Prefix for the extension's status and data columns.
+- **auto_install** — bool, default False
+  Install ``duck_diff`` from DuckDB's community repository if needed.
+
+**Returns**
+
+DuckJanitor
+One row per distinct key with row and column-level diff status.
+
+_No example available._
+
+
+
+<a id="diff_summary"></a>
+### diff_summary
+
+Return aggregate counts from a ``duck_diff`` comparison.
+
+```python
+diff_summary(self, other: 'DuckJanitor', keys: Union[str, list[str]], *, columns: Optional[list[str]] = None, ignore: Optional[list[str]] = None, numeric_tolerance: Optional[float] = None, timestamp_precision: Optional[str] = None, require_matching_columns: bool = True, upcast_types: bool = False, null_equals_empty: bool = False, auto_install: bool = False) -> 'DuckJanitor'
+```
+
+_No example available._
+
+
+
+<a id="schema_diff"></a>
+### schema_diff
+
+Compare the column names and types of two relations.
+
+```python
+schema_diff(self, other: 'DuckJanitor', *, auto_install: bool = False) -> 'DuckJanitor'
+```
 
 _No example available._
 
