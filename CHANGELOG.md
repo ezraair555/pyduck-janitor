@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.2 - 2026-09-04
+
+### Added
+- Added first-class `asof_join()` with backward, forward, nearest, key, and
+  tolerance matching for point-in-time analysis.
+- Added `window_mutate()` for composable partitioned, ordered, and framed
+  window expressions.
+- Added `recursive_cte()` for hierarchy traversal, path enumeration, and
+  reachability analysis.
+- Added optional Onager graph analytics through the `[graph]` extra, including
+  `graph_analyze()` and the flexible `graph_algorithm()` escape hatch.
+- Added optional `duck_diff` snapshot comparison through the `[diff]` extra,
+  including `diff()`, `diff_summary()`, and `schema_diff()`.
+- Added DuckDB Community Extension loading for Onager and duck_diff with
+  explicit, opt-in installation and DuckDB 1.5.x compatibility guidance.
+
+### Documentation and testing
+- Added API documentation, examples, extension loading guidance, and
+  regression coverage for temporal, recursive, graph, and snapshot analysis.
+- Verified the release candidate with the full test suite and 115 generated
+  documentation examples.
+
 ## 0.2.1 - 2026-09-04
 
 ### Added

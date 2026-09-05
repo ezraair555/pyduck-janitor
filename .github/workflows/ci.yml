@@ -69,6 +69,36 @@ jobs:
           path: artifacts/pytest.log
           if-no-files-found: error
 
+  extension-smoke:
+    name: DuckDB extension smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pinned extension runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install "duckdb==1.5.5"
+      - name: Install and load community extensions
+        run: |
+          python - <<'PY'
+          import duckdb
+
+          conn = duckdb.connect()
+          for extension in ("onager", "duck_diff"):
+              conn.execute(f"INSTALL {extension} FROM community")
+              conn.execute(f"LOAD {extension}")
+          assert conn.sql("SELECT onager_version() IS NOT NULL").fetchone()[0]
+          conn.sql(
+              "SELECT * FROM table_diff_summary("
+              "'FROM (VALUES (1, 10)) t(id, score)', "
+              "'FROM (VALUES (1, 10)) t(id, score)', pk := 'id')"
+          ).fetchall()
+          PY
+
   review-agent:
     # Only run on PRs. Posts a structured comment with module map,
     # API surface diff, and docstring coverage. This is the primary
