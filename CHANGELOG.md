@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.4 - 2026-09-04
+
+### Added
+- Added an agent-oriented repository guide in `AGENTS.md`, `llms.txt`, and
+  `docs/agent-guide.md` covering the API map, workflows, and boundaries.
+- Added a CI agent contract that verifies generated API examples, public
+  methods, and structured review output as an artifact.
+- Added Python 3.9 to the CI matrix and fixed Python 3.9-incompatible f-string
+  expressions in embedding and text helpers.
+
+### Documentation and testing
+- Linked agent resources from the README and documented the expanded CI
+  contract for contributors.
+
 ## 0.2.3 - 2026-09-04
 
 ### Added
