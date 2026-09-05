@@ -718,6 +718,37 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 ## Changelog
 
+### 0.2.7 — Alpha-numeric graph identifiers
+
+- **Onager ID compatibility**: `graph_analyze()` now accepts string and
+  alpha-numeric node identifiers. The adapter uses internal BIGINT surrogate
+  IDs for Onager and restores the original labels in the returned `node_id`
+  column.
+- **DataFrame results**: `graph_analyze()` returns a dictionary of lazy
+  `DuckJanitor` relations, one per algorithm. Call `.collect()` on the
+  algorithm result to obtain a pandas DataFrame:
+
+  ```python
+  results = edges.graph_analyze(
+      source="employee_id",
+      target="manager_id",
+      algorithms=["pagerank", "components"],
+  )
+  pagerank_df = results["pagerank"].collect()
+  components_df = results["components"].collect()
+  ```
+
+- Combine multiple algorithms with `pd.concat()` when a single DataFrame is
+  preferred:
+
+  ```python
+  all_metrics = pd.concat(
+      [relation.collect().assign(algorithm=name)
+       for name, relation in results.items()],
+      ignore_index=True,
+  )
+  ```
+
 ### 0.2.0 — 100% pyjanitor API parity
 
 - **Full pyjanitor surface**: pyduck-janitor now covers **94/94 (100%)** of the
