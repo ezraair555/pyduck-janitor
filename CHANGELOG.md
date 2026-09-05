@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.3 - 2026-09-04
+
+### Added
+- Added database-native metric APIs: `metrics()`, `profile()`, and
+  `metric_cube()` with rollups, cubes, grouping sets, and total-row metadata.
+- Added `rate_metrics()`, `cohort_metrics()`, `freshness()`, and `reconcile()`
+  for reusable rates, retention, source monitoring, and relation comparison.
+- Added `metric_from_database()` to aggregate source SQL before transferring
+  results from DB-API connections.
+- Added generic ONA and temporal helpers including `validate_keys()`,
+  `deduplicate()`, `filter_noise()`, `hierarchy_edges()`, `time_slice()`,
+  `event_window()`, `change_detection()`, and `network_evolution()`.
+
+### Documentation and testing
+- Added generated API documentation, examples, and regression coverage for
+  database metrics, temporal analysis, and generic network workflows.
+- Verified the release candidate with 343 tests and 130 documentation examples.
+
 ## 0.2.2 - 2026-09-04
 
 ### Added
