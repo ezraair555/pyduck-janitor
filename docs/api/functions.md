@@ -20,6 +20,9 @@ Complete function-by-function reference for every public method on
 | [`from_parquet`](#from_parquet) | Create a DuckJanitor from Parquet file(s) | Loaders & pipeline plumbing |
 | [`from_database`](#from_database) | Create a DuckJanitor from a query on an external database | Loaders & pipeline plumbing |
 | [`from_sql`](#from_sql) | Create a DuckJanitor from a SQL query | Loaders & pipeline plumbing |
+| [`load_extension`](#load_extension) | Load an optional DuckDB extension for this pipeline | Loaders & pipeline plumbing |
+| [`graph_algorithm`](#graph_algorithm) | Run an Onager graph table function over the current relation | Loaders & pipeline plumbing |
+| [`graph_analyze`](#graph_analyze) | Run common Onager graph algorithms over an edge relation | Loaders & pipeline plumbing |
 | [`asof_join`](#asof_join) | Join each row to the nearest eligible temporal row on the right | Loaders & pipeline plumbing |
 | [`window_mutate`](#window_mutate) | Add one or more SQL window expressions to the relation | Loaders & pipeline plumbing |
 | [`recursive_cte`](#recursive_cte) | Execute a recursive CTE rooted in the current relation | Loaders & pipeline plumbing |
@@ -401,6 +404,96 @@ A DuckJanitor instance.
 >>> dj = DuckJanitor.from_sql("SELECT 1 AS a, 'x' AS b")
 >>> dj.collect()
 ```
+
+
+
+<a id="load_extension"></a>
+### load_extension
+
+Load an optional DuckDB extension for this pipeline.
+
+```python
+load_extension(self, name: str, *, auto_install: bool = False, repository: Optional[str] = None) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **name** — str
+  Extension name, such as ``"onager"``.
+- **auto_install** — bool, default False
+  If True, ask DuckDB to install the extension when it is not
+  already available locally. For Onager, the community repository
+  is used by default.
+- **repository** — str, optional
+  Override the DuckDB extension repository used for installation.
+
+**Returns**
+
+DuckJanitor
+This object, allowing the call to remain in a method chain.
+
+_No example available._
+
+
+
+<a id="graph_algorithm"></a>
+### graph_algorithm
+
+Run an Onager graph table function over the current relation.
+
+This is the low-level escape hatch for Onager algorithms that are not
+yet wrapped by :meth:`graph_analyze`. The current relation is treated
+as an edge table and projected to the conventional ``src``, ``dst``
+(and optional ``weight``) columns expected by Onager.
+
+```python
+graph_algorithm(self, function: str, source: str, target: str, *, weight: Optional[str] = None, parameters: Optional[dict[str, Any]] = None, auto_install: bool = False) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **function** — str
+  Onager table-function name, for example
+  ``"onager_ctr_pagerank"``.
+  source, target : str
+  Current-relation columns identifying edge endpoints.
+- **weight** — str, optional
+  Current-relation column containing edge weights.
+- **parameters** — dict[str, Any], optional
+  Named SQL arguments passed to the Onager table function. Values
+  are rendered as SQL literals by DuckJanitor.
+- **auto_install** — bool, default False
+  Install Onager from DuckDB's community repository if necessary.
+
+**Returns**
+
+DuckJanitor
+The algorithm result as a new relation.
+
+_No example available._
+
+
+
+<a id="graph_analyze"></a>
+### graph_analyze
+
+Run common Onager graph algorithms over an edge relation.
+
+``algorithms`` may contain ``pagerank``, ``betweenness``,
+``closeness``, ``components``, ``louvain``, or ``dijkstra``. For
+algorithms not listed here, use :meth:`graph_algorithm` directly.
+
+```python
+graph_analyze(self, source: str, target: str, algorithms: Union[str, list[str]], *, weight: Optional[str] = None, parameters: Optional[dict[str, Any]] = None, auto_install: bool = False) -> dict[str, 'DuckJanitor']
+```
+
+**Returns**
+
+dict[str, DuckJanitor]
+One result relation per requested algorithm, keyed by the public
+algorithm name.
+
+_No example available._
 
 
 

@@ -47,6 +47,14 @@ pip install pyduck-janitor
 For Excel and Parquet I/O helpers, install the optional engines with
 `pip install pyduck-janitor[io]`.
 
+For optional graph analytics through Onager, install the graph extra. The
+extra pins a compatible DuckDB range; the native Onager extension is loaded
+only when requested from DuckDB's community repository:
+
+```bash
+pip install "pyduck-janitor[graph]"
+```
+
 For development from a checkout, use the editable install. The `[dev]` extra
 pulls in the test and lint dependencies used by `pytest`, `ruff`, and the
 API-doc generator:
@@ -225,6 +233,50 @@ These are the only truly *new* methods (no pyjanitor counterpart) — they exist
 - [`explain()`](docs/api/functions.md#explain) - EXPLAIN plan for the current pipeline
 - [`collect()`](docs/api/functions.md#collect) / [`head()`](docs/api/functions.md#head) - Materialize to pandas / preview rows
 - [`get_shared_connection()`](docs/api/functions.md#get_shared_connection) - access to the underlying DuckDB connection
+
+### Optional Onager graph analytics
+
+Onager is an optional DuckDB graph-algorithm extension. It adds centrality,
+community detection, connected components, and path algorithms without making
+graph binaries part of the base installation. The graph adapter targets
+DuckDB `1.5.x` because native extension binaries are version-specific.
+
+```python
+edges = DuckJanitor.from_pandas(pd.DataFrame({
+    "employee_id": [1, 2, 3],
+    "manager_id": [2, 3, 1],
+    "weight": [1.0, 2.0, 1.0],
+}))
+
+# Set auto_install=True only when this process may download extensions.
+metrics = edges.graph_analyze(
+    source="employee_id",
+    target="manager_id",
+    algorithms=["pagerank", "louvain", "components"],
+    weight="weight",
+    auto_install=True,
+)
+pagerank = metrics["pagerank"].collect()
+```
+
+For air-gapped or managed environments, install Onager separately and use
+`auto_install=False`. The lower-level `graph_algorithm()` method accepts any
+Onager table-function name, so new Onager algorithms can be used before a
+convenience wrapper is added:
+
+```python
+edges.load_extension("onager", auto_install=False)
+result = edges.graph_algorithm(
+    "onager_pth_dijkstra",
+    source="employee_id",
+    target="manager_id",
+    parameters={"source": 1},
+)
+```
+
+Onager is intentionally not imported at package import time and is not a
+hard dependency. DuckGQL remains a separate optional graph-querying adapter;
+Onager is for graph algorithms and network metrics.
 
 Plus the pandas-flavored bases that pyjanitor implements differently and pyduck implements natively (comparable intent, DuckDB-native implementation — documented in the module tables above): [`dropna`](docs/api/functions.md#dropna), [`fill`](docs/api/functions.md#fill), [`filter_column`](docs/api/functions.md#filter_column), [`convert_date`](docs/api/functions.md#convert_date), [`truncate_datetime`](docs/api/functions.md#truncate_datetime), [`get_dummies`](docs/api/functions.md#get_dummies).
 

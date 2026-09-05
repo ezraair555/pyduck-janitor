@@ -972,6 +972,150 @@ class DuckJanitor:
         new_relation = self._connection.query(query)
         return DuckJanitor(new_relation, self._connection)
 
+    def load_extension(
+        self,
+        name: str,
+        *,
+        auto_install: bool = False,
+        repository: Optional[str] = None,
+    ) -> "DuckJanitor":
+        """Load an optional DuckDB extension for this pipeline.
+
+        Parameters
+        ----------
+        name : str
+            Extension name, such as ``"onager"``.
+        auto_install : bool, default False
+            If True, ask DuckDB to install the extension when it is not
+            already available locally. For Onager, the community repository
+            is used by default.
+        repository : str, optional
+            Override the DuckDB extension repository used for installation.
+
+        Returns
+        -------
+        DuckJanitor
+            This object, allowing the call to remain in a method chain.
+        """
+        from .extensions import load_extension as _load_extension
+
+        _load_extension(
+            self._connection,
+            name,
+            install=auto_install,
+            repository=repository,
+        )
+        return self
+
+    def graph_algorithm(
+        self,
+        function: str,
+        source: str,
+        target: str,
+        *,
+        weight: Optional[str] = None,
+        parameters: Optional[dict[str, Any]] = None,
+        auto_install: bool = False,
+    ) -> "DuckJanitor":
+        """Run an Onager graph table function over the current relation.
+
+        This is the low-level escape hatch for Onager algorithms that are not
+        yet wrapped by :meth:`graph_analyze`. The current relation is treated
+        as an edge table and projected to the conventional ``src``, ``dst``
+        (and optional ``weight``) columns expected by Onager.
+
+        Parameters
+        ----------
+        function : str
+            Onager table-function name, for example
+            ``"onager_ctr_pagerank"``.
+        source, target : str
+            Current-relation columns identifying edge endpoints.
+        weight : str, optional
+            Current-relation column containing edge weights.
+        parameters : dict[str, Any], optional
+            Named SQL arguments passed to the Onager table function. Values
+            are rendered as SQL literals by DuckJanitor.
+        auto_install : bool, default False
+            Install Onager from DuckDB's community repository if necessary.
+
+        Returns
+        -------
+        DuckJanitor
+            The algorithm result as a new relation.
+        """
+        if not re.fullmatch(r"onager_[A-Za-z0-9_]+", function):
+            raise ValueError("function must be an Onager table-function name")
+
+        columns = set(self._relation.columns)
+        required = [source, target] + ([weight] if weight else [])
+        missing = [column for column in required if column not in columns]
+        if missing:
+            raise ValueError(f"graph_algorithm(): unknown edge columns {missing}")
+
+        self.load_extension("onager", auto_install=auto_install)
+        temp_name = f"_onager_edges_{id(self._relation)}"
+        self._connection.register(temp_name, self._relation)
+        edge_columns = f"{self._quote(source)} AS src, {self._quote(target)} AS dst"
+        if weight:
+            edge_columns += f", {self._quote(weight)} AS weight"
+        arguments = [f"(SELECT {edge_columns} FROM {self._quote(temp_name)})"]
+        for key, value in (parameters or {}).items():
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+                raise ValueError(f"graph_algorithm(): invalid parameter name {key!r}")
+            arguments.append(f"{key} := {self._sql_value(value)}")
+        query = f"SELECT * FROM {function}({', '.join(arguments)})"
+        return DuckJanitor(self._connection.query(query), self._connection)
+
+    def graph_analyze(
+        self,
+        source: str,
+        target: str,
+        algorithms: Union[str, list[str]],
+        *,
+        weight: Optional[str] = None,
+        parameters: Optional[dict[str, Any]] = None,
+        auto_install: bool = False,
+    ) -> dict[str, "DuckJanitor"]:
+        """Run common Onager graph algorithms over an edge relation.
+
+        ``algorithms`` may contain ``pagerank``, ``betweenness``,
+        ``closeness``, ``components``, ``louvain``, or ``dijkstra``. For
+        algorithms not listed here, use :meth:`graph_algorithm` directly.
+
+        Returns
+        -------
+        dict[str, DuckJanitor]
+            One result relation per requested algorithm, keyed by the public
+            algorithm name.
+        """
+        function_map = {
+            "pagerank": "onager_ctr_pagerank",
+            "betweenness": "onager_ctr_betweenness",
+            "closeness": "onager_ctr_closeness",
+            "components": "onager_cmm_components",
+            "louvain": "onager_cmm_louvain",
+            "dijkstra": "onager_pth_dijkstra",
+        }
+        names = [algorithms] if isinstance(algorithms, str) else list(algorithms)
+        unknown = [name for name in names if name not in function_map]
+        if unknown:
+            raise ValueError(
+                f"Unknown graph algorithms {unknown}; choose from {sorted(function_map)} "
+                "or use graph_algorithm() for a custom Onager function."
+            )
+        return {
+            name: self.graph_algorithm(
+                function_map[name],
+                source,
+                target,
+                weight=weight,
+                parameters=parameters,
+                auto_install=auto_install,
+            )
+            for name in names
+        }
+
     def window_mutate(
         self,
         expressions: dict[str, Union[str, dict[str, Any]]],

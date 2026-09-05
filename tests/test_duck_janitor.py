@@ -42,6 +42,37 @@ class TestDuckJanitor:
         assert isinstance(dj, DuckJanitor)
         assert len(dj.head()) == len(sample_data)
 
+    def test_graph_analyze_dispatches_common_onager_algorithms(self, monkeypatch):
+        dj = DuckJanitor.from_pandas(pd.DataFrame({"source": [1], "target": [2], "weight": [1.0]}))
+        calls = []
+
+        def fake_graph_algorithm(self, function, source, target, **kwargs):
+            calls.append((function, source, target, kwargs))
+            return "result"
+
+        monkeypatch.setattr(DuckJanitor, "graph_algorithm", fake_graph_algorithm)
+
+        result = dj.graph_analyze(
+            "source",
+            "target",
+            ["pagerank", "louvain", "components"],
+            weight="weight",
+        )
+
+        assert result == {"pagerank": "result", "louvain": "result", "components": "result"}
+        assert [call[0] for call in calls] == [
+            "onager_ctr_pagerank",
+            "onager_cmm_louvain",
+            "onager_cmm_components",
+        ]
+        assert all(call[3]["weight"] == "weight" for call in calls)
+
+    def test_graph_analyze_rejects_unknown_algorithm(self):
+        dj = DuckJanitor.from_pandas(pd.DataFrame({"source": [1], "target": [2]}))
+
+        with pytest.raises(ValueError, match="Unknown graph algorithms"):
+            dj.graph_analyze("source", "target", "not_an_algorithm")
+
     def test_from_excel(self, tmp_path):
         """Test creating DuckJanitor from an Excel file."""
         df = pd.DataFrame(

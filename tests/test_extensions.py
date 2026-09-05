@@ -15,3 +15,16 @@ def test_skip_extensions_env_disables_loading(monkeypatch):
             load_extension(conn, "json")
     finally:
         conn.close()
+
+
+def test_onager_install_uses_community_repository(monkeypatch):
+    statements = []
+
+    class FakeConnection:
+        def execute(self, statement):
+            statements.append(statement)
+
+    monkeypatch.delenv("PYDUCK_SKIP_EXTENSIONS", raising=False)
+    load_extension(FakeConnection(), "onager")
+
+    assert statements == ["INSTALL onager FROM community", "LOAD onager"]

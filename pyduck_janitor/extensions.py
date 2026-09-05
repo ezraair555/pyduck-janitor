@@ -1,7 +1,8 @@
 """
 DuckDB extension management for pyduck-janitor.
 
-Loads and caches DuckDB extensions (``icu``, ``fts``, ``vss``, ``json``)
+Loads and caches DuckDB extensions (``icu``, ``fts``, ``vss``, ``json``,
+``onager``)
 on a per-connection basis. Extensions are an opt-in capability: the
 core pyduck-janitor verbs do not require them, and a missing extension
 is surfaced as a clear ``ExtensionNotAvailable`` error pointing at the
@@ -38,7 +39,10 @@ EXTENSIONS: dict[str, tuple[str, str]] = {
     "fts": ("fts", "fts"),
     "vss": ("vss", "vss"),
     "json": ("json", "json"),
+    "onager": ("graph", "onager"),
 }
+
+_COMMUNITY_EXTENSIONS = {"onager"}
 
 
 class ExtensionNotAvailable(RuntimeError):
@@ -99,6 +103,7 @@ def load_extension(
     name: str,
     *,
     install: bool = True,
+    repository: Optional[str] = None,
 ) -> None:
     """Load a DuckDB extension onto a connection.
 
@@ -107,11 +112,15 @@ def load_extension(
     conn : duckdb.DuckDBPyConnection
         The connection to load the extension onto.
     name : str
-        Logical extension name (one of ``icu``, ``fts``, ``vss``, ``json``).
+        Logical extension name (one of ``icu``, ``fts``, ``vss``, ``json``,
+        or ``onager``).
     install : bool, default True
         If True, run ``INSTALL <name>`` before ``LOAD <name>``. Set
         False when the extension has already been installed system-wide
         or you want to surface install errors separately.
+    repository : str, optional
+        DuckDB extension repository used by ``INSTALL``. Onager defaults to
+        ``"community"``; other extensions use DuckDB's default repository.
 
     Raises
     ------
@@ -132,7 +141,7 @@ def load_extension(
     if _env_disabled():
         raise ExtensionNotAvailable(
             name,
-            f"Extension loading disabled by PYDUCK_SKIP_EXTENSIONS " f"for '{duckdb_name}'.",
+            f"Extension loading disabled by PYDUCK_SKIP_EXTENSIONS for '{duckdb_name}'.",
             pip_extra=pip_extra,
         )
 
@@ -140,7 +149,13 @@ def load_extension(
     # via a custom DuckDB configuration or a Docker image).
     if install:
         try:
-            conn.execute(f"INSTALL {duckdb_name}")
+            install_sql = f"INSTALL {duckdb_name}"
+            repository = repository or ("community" if name in _COMMUNITY_EXTENSIONS else None)
+            if repository:
+                if not repository.replace("_", "").isalnum():
+                    raise ValueError("repository must contain only letters, numbers, or _")
+                install_sql += f" FROM {repository}"
+            conn.execute(install_sql)
         except duckdb.Error as exc:
             raise ExtensionNotAvailable(
                 name,
