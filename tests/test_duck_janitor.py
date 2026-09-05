@@ -74,6 +74,31 @@ class TestDuckJanitor:
         with pytest.raises(ValueError, match="Unknown graph algorithms"):
             dj.graph_analyze("source", "target", "not_an_algorithm")
 
+    def test_graph_analyze_preserves_alpha_node_ids(self):
+        connection = duckdb.connect()
+        try:
+            connection.execute("INSTALL onager FROM community")
+            connection.execute("LOAD onager")
+        except duckdb.Error:
+            connection.close()
+            pytest.skip("Onager community extension is unavailable")
+        try:
+            dj = DuckJanitor(
+                connection.from_df(
+                    pd.DataFrame(
+                        {
+                            "source": ["alice", "bob", "carol"],
+                            "target": ["bob", "carol", "alice"],
+                        }
+                    )
+                ),
+                connection=connection,
+            )
+            result = dj.graph_analyze("source", "target", "pagerank")["pagerank"].collect()
+            assert set(result["node_id"]) == {"alice", "bob", "carol"}
+        finally:
+            connection.close()
+
     def test_validate_keys_and_deduplicate(self):
         dj = DuckJanitor.from_pandas(
             pd.DataFrame({"id": [1, 1, 2], "as_of": [2, 1, 1], "value": [20, 10, 30]})

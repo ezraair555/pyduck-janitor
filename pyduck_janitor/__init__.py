@@ -84,7 +84,7 @@ from .text_ops import (
     text_normalize,
 )
 
-__version__ = "0.2.6"
+__version__ = "0.2.7"
 __author__ = "EzraAir555"
 __all__ = [
     "DuckJanitor",

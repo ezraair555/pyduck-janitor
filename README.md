@@ -277,6 +277,10 @@ metrics = edges.graph_analyze(
 pagerank = metrics["pagerank"].collect()
 ```
 
+Node identifiers may be strings such as employee usernames or account codes.
+The adapter maps non-integer IDs to BIGINT surrogates for Onager and restores
+the original labels in the result's `node_id` column.
+
 For air-gapped or managed environments, install Onager separately and use
 `auto_install=False`. The lower-level `graph_algorithm()` method accepts any
 Onager table-function name, so new Onager algorithms can be used before a

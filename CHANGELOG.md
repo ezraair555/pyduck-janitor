@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.7 - 2026-09-04
+
+### Fixed
+- Fixed Onager graph analytics for string and alpha-numeric node IDs. The
+  adapter now maps non-integer endpoints to BIGINT surrogates and restores the
+  original labels in result `node_id` values.
+- Added regression coverage and a DuckDB 1.5.5 extension smoke check for
+  alpha-numeric graph identifiers.
+
 ## 0.2.6 - 2026-09-04
 
 ### Changed

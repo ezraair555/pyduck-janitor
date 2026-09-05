@@ -1056,16 +1056,76 @@ class DuckJanitor:
         self.load_extension("onager", auto_install=auto_install)
         temp_name = f"_onager_edges_{id(self._relation)}"
         self._connection.register(temp_name, self._relation)
-        edge_columns = f"{self._quote(source)} AS src, {self._quote(target)} AS dst"
+        source_type = str(self._relation.types[list(self._relation.columns).index(source)]).upper()
+        target_type = str(self._relation.types[list(self._relation.columns).index(target)]).upper()
+        integer_types = {
+            "TINYINT",
+            "SMALLINT",
+            "INTEGER",
+            "BIGINT",
+            "HUGEINT",
+            "UTINYINT",
+            "USMALLINT",
+            "UINTEGER",
+            "UBIGINT",
+        }
+        node_map_name = None
+        if source_type in integer_types and target_type in integer_types:
+            edge_columns = (
+                f"CAST({self._quote(source)} AS BIGINT) AS src, "
+                f"CAST({self._quote(target)} AS BIGINT) AS dst"
+            )
+        else:
+            node_map_name = f"_onager_nodes_{id(self._relation)}"
+            node_map = self._connection.sql(
+                f"""
+                SELECT node_key, ROW_NUMBER() OVER ()::BIGINT AS node_id
+                FROM (
+                    SELECT CAST({self._quote(source)} AS VARCHAR) AS node_key
+                    FROM {self._quote(temp_name)}
+                    WHERE {self._quote(source)} IS NOT NULL
+                    UNION
+                    SELECT CAST({self._quote(target)} AS VARCHAR) AS node_key
+                    FROM {self._quote(temp_name)}
+                    WHERE {self._quote(target)} IS NOT NULL
+                ) AS unique_nodes
+                """
+            )
+            self._connection.register(node_map_name, node_map)
+            encoded_name = f"_onager_encoded_{id(self._relation)}"
+            encoded_query = (
+                "SELECT src_node.node_id AS src, dst_node.node_id AS dst "
+                + (f", {self._quote(weight)} AS weight " if weight else "")
+                + f"FROM {self._quote(temp_name)} AS edges "
+                f"JOIN {self._quote(node_map_name)} AS src_node "
+                f"ON CAST(edges.{self._quote(source)} AS VARCHAR) = src_node.node_key "
+                f"JOIN {self._quote(node_map_name)} AS dst_node "
+                f"ON CAST(edges.{self._quote(target)} AS VARCHAR) = dst_node.node_key"
+            )
+            encoded = self._connection.sql(encoded_query)
+            self._connection.register(encoded_name, encoded)
+            temp_name = encoded_name
+            edge_columns = "src, dst" + (", weight" if weight else "")
         if weight:
-            edge_columns += f", {self._quote(weight)} AS weight"
+            if node_map_name is None:
+                edge_columns += f", {self._quote(weight)} AS weight"
         arguments = [f"(SELECT {edge_columns} FROM {self._quote(temp_name)})"]
         for key, value in (parameters or {}).items():
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
                 raise ValueError(f"graph_algorithm(): invalid parameter name {key!r}")
             arguments.append(f"{key} := {self._sql_value(value)}")
         query = f"SELECT * FROM {function}({', '.join(arguments)})"
-        return DuckJanitor(self._connection.query(query), self._connection)
+        result = self._connection.query(query)
+        if node_map_name and "node_id" in result.columns:
+            result_name = f"_onager_result_{id(result)}"
+            self._connection.register(result_name, result)
+            result = self._connection.sql(
+                f"SELECT nodes.node_key AS node_id, result.* EXCLUDE (node_id) "
+                f"FROM {self._quote(result_name)} AS result "
+                f"JOIN {self._quote(node_map_name)} AS nodes "
+                "ON result.node_id = nodes.node_id"
+            )
+        return DuckJanitor(result, self._connection)
 
     def graph_analyze(
         self,
@@ -1082,6 +1142,8 @@ class DuckJanitor:
         ``algorithms`` may contain ``pagerank``, ``betweenness``,
         ``closeness``, ``components``, ``louvain``, or ``dijkstra``. For
         algorithms not listed here, use :meth:`graph_algorithm` directly.
+        String and other non-integer node identifiers are supported; they are
+        mapped to BIGINT surrogate IDs for Onager and mapped back in results.
 
         Returns
         -------
