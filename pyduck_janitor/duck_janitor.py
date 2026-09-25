@@ -4875,6 +4875,177 @@ class DuckJanitor:
             result[(left_on, right_on, op)] = pairs
         return result
 
+    # ─────────────────────────────────────────────────────────────────────
+    # dplyr-style explicit join verbs (R/dplyr parity, DuckDB-backed)
+    # ─────────────────────────────────────────────────────────────────────
+
+    def inner_join(
+        self,
+        other: "DuckJanitor",
+        on: Union[str, list[str], None] = None,
+        *,
+        left_on: Union[str, list[str], None] = None,
+        right_on: Union[str, list[str], None] = None,
+        suffixes: tuple[str, str] = ("_x", "_y"),
+    ) -> "DuckJanitor":
+        """Return rows whose key matches on both sides (dplyr / R ``inner_join``).
+
+        Parameters
+        ----------
+        other : DuckJanitor
+            The right-side relation to join.
+        on : str or list of str, optional
+            Column name(s) shared by both sides. Use this when the key has
+            the same name on left and right. Mutually exclusive with
+            ``left_on`` / ``right_on``.
+        left_on, right_on : str or list of str, optional
+            Column names when the join key has a different name on each side.
+            Both must be supplied together and have equal length.
+        suffixes : tuple of (str, str), default ``('_x', '_y')``
+            Suffix applied to right-side columns whose names collide with a
+            non-key left column.
+        conn : DuckDBPyConnection, optional
+            Connection that owns the left relation (defaults to
+            ``self._connection``).
+
+        Returns
+        -------
+        DuckJanitor
+            New instance with the join applied.
+
+        Example
+        -------
+        >>> import pandas as pd
+        >>> from pyduck_janitor import DuckJanitor
+        >>> emps = DuckJanitor.from_pandas(pd.DataFrame({
+        ...     'id': [1, 2, 3], 'name': ['a', 'b', 'c'], 'dept_id': [10, 20, 30]
+        ... }))
+        >>> depts = DuckJanitor.from_pandas(pd.DataFrame({
+        ...     'dept_id': [10, 20, 99], 'dept_name': ['Eng', 'Sales', 'HR']
+        ... }))
+        >>> emps.inner_join(depts, on='dept_id').collect()
+           id name  dept_id dept_name
+        0   1    a       10       Eng
+        1   2    b       20     Sales
+        """
+        from .joins import inner_join as _inner_join
+
+        return _inner_join(
+            self,
+            other,
+            on,
+            left_on=left_on,
+            right_on=right_on,
+            suffixes=suffixes,
+            conn=self._connection,
+        )
+
+    def left_join(
+        self,
+        other: "DuckJanitor",
+        on: Union[str, list[str], None] = None,
+        *,
+        left_on: Union[str, list[str], None] = None,
+        right_on: Union[str, list[str], None] = None,
+        suffixes: tuple[str, str] = ("_x", "_y"),
+    ) -> "DuckJanitor":
+        """Keep every left row; matched right rows; NULL on miss (dplyr ``left_join``).
+
+        Example
+        -------
+        >>> emps.left_join(depts, on='dept_id').collect()
+           id name  dept_id dept_name
+        0   1    a       10       Eng
+        1   2    b       20     Sales
+        2   3    c       30      None   # dept_id=30 has no department row
+
+        """
+        from .joins import left_join as _left_join
+
+        return _left_join(
+            self,
+            other,
+            on,
+            left_on=left_on,
+            right_on=right_on,
+            suffixes=suffixes,
+            conn=self._connection,
+        )
+
+    def right_join(
+        self,
+        other: "DuckJanitor",
+        on: Union[str, list[str], None] = None,
+        *,
+        left_on: Union[str, list[str], None] = None,
+        right_on: Union[str, list[str], None] = None,
+        suffixes: tuple[str, str] = ("_x", "_y"),
+    ) -> "DuckJanitor":
+        """Keep every right row; matched left rows; NULL on miss (dplyr ``right_join``)."""
+        from .joins import right_join as _right_join
+
+        return _right_join(
+            self,
+            other,
+            on,
+            left_on=left_on,
+            right_on=right_on,
+            suffixes=suffixes,
+            conn=self._connection,
+        )
+
+    def full_join(
+        self,
+        other: "DuckJanitor",
+        on: Union[str, list[str], None] = None,
+        *,
+        left_on: Union[str, list[str], None] = None,
+        right_on: Union[str, list[str], None] = None,
+        suffixes: tuple[str, str] = ("_x", "_y"),
+    ) -> "DuckJanitor":
+        """Keep every row from both sides; NULL on either side on miss (dplyr ``full_join``)."""
+        from .joins import full_join as _full_join
+
+        return _full_join(
+            self,
+            other,
+            on,
+            left_on=left_on,
+            right_on=right_on,
+            suffixes=suffixes,
+            conn=self._connection,
+        )
+
+    def semi_join(
+        self,
+        other: "DuckJanitor",
+        on: Union[str, list[str], None] = None,
+        *,
+        left_on: Union[str, list[str], None] = None,
+        right_on: Union[str, list[str], None] = None,
+    ) -> "DuckJanitor":
+        """Return left rows whose key EXISTS on right; no right columns (dplyr ``semi_join``)."""
+        from .joins import semi_join as _semi_join
+
+        return _semi_join(
+            self, other, on, left_on=left_on, right_on=right_on, conn=self._connection
+        )
+
+    def anti_join(
+        self,
+        other: "DuckJanitor",
+        on: Union[str, list[str], None] = None,
+        *,
+        left_on: Union[str, list[str], None] = None,
+        right_on: Union[str, list[str], None] = None,
+    ) -> "DuckJanitor":
+        """Return left rows whose key does NOT exist on right; no right columns (dplyr ``anti_join``)."""
+        from .joins import anti_join as _anti_join
+
+        return _anti_join(
+            self, other, on, left_on=left_on, right_on=right_on, conn=self._connection
+        )
+
     def to_datetime(
         self,
         column: str,

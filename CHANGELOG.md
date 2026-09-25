@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+- **dplyr-style explicit join verbs** (`pyduck_janitor.joins` and methods on
+  `DuckJanitor`): `inner_join`, `left_join`, `right_join`, `full_join`,
+  `semi_join`, `anti_join`. R/dplyr parity, DuckDB-native SQL.
+  - Supports shared-key (`on='dept_id'`) and asymmetric-key
+    (`left_on=..., right_on=...`) calling shapes.
+  - Configurable `suffixes` for non-key column collisions (default `_x`/`_y`).
+  - `semi_join` and `anti_join` have no pandas equivalent — they keep left
+    columns only and filter rows via `WHERE EXISTS` / `WHERE NOT EXISTS`.
+  - Module-level functions and methods are interchangeable.
+  - 20 new tests in `tests/test_dplyr_joins.py`.
+  - Auto-generated API entries in `docs/api/functions.md` (6 new sections,
+    plus TOC entries).
+
 ## 0.2.7 - 2026-09-04
 
 ### Fixed

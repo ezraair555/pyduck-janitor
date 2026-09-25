@@ -62,6 +62,14 @@ from .cleaning_ops_final import (
     mutate,
     process_text,
 )
+from .joins import (
+    anti_join,
+    full_join,
+    inner_join,
+    left_join,
+    right_join,
+    semi_join,
+)
 from .duck_janitor import DropLabel, DuckJanitor, patterns
 from .embeddings import (
     DEFAULT_EMBED_MODEL,
@@ -164,4 +172,11 @@ __all__ = __all__ + [
     "build_vector_index",
     "vector_search",
     "fuzzy_dedupe",
+    # dplyr-style explicit join verbs (R/dplyr parity, DuckDB-backed)
+    "inner_join",
+    "left_join",
+    "right_join",
+    "full_join",
+    "semi_join",
+    "anti_join",
 ]

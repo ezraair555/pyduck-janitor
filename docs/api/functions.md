@@ -120,6 +120,12 @@ Complete function-by-function reference for every public method on
 | [`join_apply`](#join_apply) | Perform join then apply Python function to each row | Hybrid verbs |
 | [`process_text`](#process_text) | Apply text processing function to a column | Hybrid verbs |
 | [`describe_class`](#describe_class) | Describe the column types of this relation (pyjanitor ``describe_class`` parity) | Hybrid verbs |
+| [`inner_join`](#inner_join) | Return rows whose key matches on both sides (dplyr / R ``inner_join``) | Hybrid verbs |
+| [`left_join`](#left_join) | Keep every left row; matched right rows; NULL on miss (dplyr ``left_join``) | Hybrid verbs |
+| [`right_join`](#right_join) | Keep every right row; matched left rows; NULL on miss (dplyr ``right_join``) | Hybrid verbs |
+| [`full_join`](#full_join) | Keep every row from both sides; NULL on either side on miss (dplyr ``full_join``) | Hybrid verbs |
+| [`semi_join`](#semi_join) | Return left rows whose key EXISTS on right; no right columns (dplyr ``semi_join``) | Hybrid verbs |
+| [`anti_join`](#anti_join) | Return left rows whose key does NOT exist on right; no right columns (dplyr ``anti_join``) | Hybrid verbs |
 | [`move`](#move) | Move ``source`` column relative to ``target`` column | Pyjanitor parity: structural, reshape & aggregation verbs |
 | [`reorder_columns`](#reorder_columns) | Reorder the relation's columns to match ``new_order`` | Pyjanitor parity: structural, reshape & aggregation verbs |
 | [`get_columns`](#get_columns) | Select columns by name (alias of :meth:`select_columns`) | Pyjanitor parity: structural, reshape & aggregation verbs |
@@ -159,7 +165,7 @@ Complete function-by-function reference for every public method on
 Create a DuckJanitor from a pandas DataFrame.
 
 ```python
-from_pandas(df: pandas.core.frame.DataFrame) -> 'DuckJanitor'
+from_pandas(df: pandas.DataFrame) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -522,6 +528,8 @@ Run common Onager graph algorithms over an edge relation.
 ``algorithms`` may contain ``pagerank``, ``betweenness``,
 ``closeness``, ``components``, ``louvain``, or ``dijkstra``. For
 algorithms not listed here, use :meth:`graph_algorithm` directly.
+String and other non-integer node identifiers are supported; they are
+mapped to BIGINT surrogate IDs for Onager and mapped back in results.
 
 ```python
 graph_analyze(self, source: str, target: str, algorithms: Union[str, list[str]], *, weight: Optional[str] = None, parameters: Optional[dict[str, Any]] = None, auto_install: bool = False) -> dict[str, 'DuckJanitor']
@@ -1086,7 +1094,7 @@ reconcile(self, other: 'DuckJanitor', keys: Union[str, list[str]]) -> 'DuckJanit
 Execute the pipeline and return results as a pandas DataFrame.
 
 ```python
-collect(self) -> pandas.core.frame.DataFrame
+collect(self) -> pandas.DataFrame
 ```
 
 **Returns**
@@ -1108,7 +1116,7 @@ The cleaned data.
 Return the first n rows.
 
 ```python
-head(self, n: int = 5) -> pandas.core.frame.DataFrame
+head(self, n: int = 5) -> pandas.DataFrame
 ```
 
 **Parameters**
@@ -3324,7 +3332,7 @@ Self for method chaining.
 Compare columns between two DuckJanitor instances.
 
 ```python
-compare_df_cols(self, other: 'DuckJanitor') -> pandas.core.frame.DataFrame
+compare_df_cols(self, other: 'DuckJanitor') -> pandas.DataFrame
 ```
 
 **Parameters**
@@ -3455,7 +3463,7 @@ Self for method chaining, with ``new_column_name`` added.
 Describe the column types of this relation (pyjanitor ``describe_class`` parity).
 
 ```python
-describe_class(self, strict_description: bool = True) -> pandas.core.frame.DataFrame
+describe_class(self, strict_description: bool = True) -> pandas.DataFrame
 ```
 
 **Parameters**
@@ -3475,6 +3483,154 @@ One row per column with ``column_name`` and ``column_type``.
 ```python
 >>> dj = DuckJanitor.from_pandas(df)
 >>> dj.describe_class()
+```
+
+
+
+<a id="inner_join"></a>
+### inner_join
+
+Return rows whose key matches on both sides (dplyr / R ``inner_join``).
+
+```python
+inner_join(self, other: 'DuckJanitor', on: Union[str, list[str], NoneType] = None, *, left_on: Union[str, list[str], NoneType] = None, right_on: Union[str, list[str], NoneType] = None, suffixes: tuple[str, str] = ('_x', '_y')) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **other** — DuckJanitor
+  The right-side relation to join.
+- **on** — str or list of str, optional
+  Column name(s) shared by both sides. Use this when the key has
+  the same name on left and right. Mutually exclusive with
+  ``left_on`` / ``right_on``.
+  left_on, right_on : str or list of str, optional
+  Column names when the join key has a different name on each side.
+  Both must be supplied together and have equal length.
+- **suffixes** — tuple of (str, str), default ``('_x', '_y')``
+  Suffix applied to right-side columns whose names collide with a
+  non-key left column.
+- **conn** — DuckDBPyConnection, optional
+  Connection that owns the left relation (defaults to
+  ``self._connection``).
+
+**Returns**
+
+DuckJanitor
+New instance with the join applied.
+
+**Example** *(from docstring)*
+
+```python
+>>> import pandas as pd
+>>> from pyduck_janitor import DuckJanitor
+>>> emps = DuckJanitor.from_pandas(pd.DataFrame({
+>>>     'id': [1, 2, 3], 'name': ['a', 'b', 'c'], 'dept_id': [10, 20, 30]
+>>> }))
+>>> depts = DuckJanitor.from_pandas(pd.DataFrame({
+>>>     'dept_id': [10, 20, 99], 'dept_name': ['Eng', 'Sales', 'HR']
+>>> }))
+>>> emps.inner_join(depts, on='dept_id').collect()
+>>>    id name  dept_id dept_name
+>>> 0   1    a       10       Eng
+>>> 1   2    b       20     Sales
+```
+
+
+
+<a id="left_join"></a>
+### left_join
+
+Keep every left row; matched right rows; NULL on miss (dplyr ``left_join``).
+
+```python
+left_join(self, other: 'DuckJanitor', on: Union[str, list[str], NoneType] = None, *, left_on: Union[str, list[str], NoneType] = None, right_on: Union[str, list[str], NoneType] = None, suffixes: tuple[str, str] = ('_x', '_y')) -> 'DuckJanitor'
+```
+
+**Example** *(from docstring)*
+
+```python
+>>> emps.left_join(depts, on='dept_id').collect()
+>>>    id name  dept_id dept_name
+>>> 0   1    a       10       Eng
+>>> 1   2    b       20     Sales
+>>> 2   3    c       30      None   # dept_id=30 has no department row
+```
+
+
+
+<a id="right_join"></a>
+### right_join
+
+Keep every right row; matched left rows; NULL on miss (dplyr ``right_join``).
+
+```python
+right_join(self, other: 'DuckJanitor', on: Union[str, list[str], NoneType] = None, *, left_on: Union[str, list[str], NoneType] = None, right_on: Union[str, list[str], NoneType] = None, suffixes: tuple[str, str] = ('_x', '_y')) -> 'DuckJanitor'
+```
+
+**Example** *(from verified snippet)*
+
+```python
+>>> left = DuckJanitor.from_pandas(pd.DataFrame({'id': [1, 2, 3], 'v': [10, 20, 30]}))
+>>> right = DuckJanitor.from_pandas(pd.DataFrame({'id': [1, 2, 99], 'w': [100, 200, 900]}))
+>>> left.right_join(right, on='id').collect()
+```
+
+
+
+<a id="full_join"></a>
+### full_join
+
+Keep every row from both sides; NULL on either side on miss (dplyr ``full_join``).
+
+```python
+full_join(self, other: 'DuckJanitor', on: Union[str, list[str], NoneType] = None, *, left_on: Union[str, list[str], NoneType] = None, right_on: Union[str, list[str], NoneType] = None, suffixes: tuple[str, str] = ('_x', '_y')) -> 'DuckJanitor'
+```
+
+**Example** *(from verified snippet)*
+
+```python
+>>> left = DuckJanitor.from_pandas(pd.DataFrame({'id': [1, 2, 3], 'v': [10, 20, 30]}))
+>>> right = DuckJanitor.from_pandas(pd.DataFrame({'id': [1, 2, 99], 'w': [100, 200, 900]}))
+>>> left.full_join(right, on='id').collect()
+```
+
+
+
+<a id="semi_join"></a>
+### semi_join
+
+Return left rows whose key EXISTS on right; no right columns (dplyr ``semi_join``).
+
+```python
+semi_join(self, other: 'DuckJanitor', on: Union[str, list[str], NoneType] = None, *, left_on: Union[str, list[str], NoneType] = None, right_on: Union[str, list[str], NoneType] = None) -> 'DuckJanitor'
+```
+
+**Example** *(from verified snippet)*
+
+```python
+>>> left = DuckJanitor.from_pandas(pd.DataFrame({'id': [1, 2, 3], 'v': [10, 20, 30]}))
+>>> right = DuckJanitor.from_pandas(pd.DataFrame({'id': [1, 2, 99], 'w': [100, 200, 900]}))
+>>> left.semi_join(right, on='id').collect()
+```
+
+
+
+<a id="anti_join"></a>
+### anti_join
+
+Return left rows whose key does NOT exist on right; no right columns (dplyr ``anti_join``).
+
+```python
+anti_join(self, other: 'DuckJanitor', on: Union[str, list[str], NoneType] = None, *, left_on: Union[str, list[str], NoneType] = None, right_on: Union[str, list[str], NoneType] = None) -> 'DuckJanitor'
+```
+
+**Example** *(from verified snippet)*
+
+```python
+>>> left = DuckJanitor.from_pandas(pd.DataFrame({'id': [1, 2, 3], 'v': [10, 20, 30]}))
+>>> right = DuckJanitor.from_pandas(pd.DataFrame({'id': [1, 2, 99], 'w': [100, 200, 900]}))
+>>> left.anti_join(right, on='id').collect()
 ```
 
 

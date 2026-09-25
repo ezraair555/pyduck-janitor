@@ -176,6 +176,41 @@ pyduck-janitor implements the **complete pyjanitor documented API** (94/94 funct
 - [`join_apply()`](docs/api/functions.md#join_apply) - Apply function to joined data
 - [`process_text()`](docs/api/functions.md#process_text) - Text processing
 
+### Explicit join verbs (dplyr-style, `joins.py`)
+
+R/dplyr parity. DuckDB-native SQL: `INNER JOIN`, `LEFT JOIN`, `RIGHT JOIN`, `FULL JOIN`, plus `semi_join` (`WHERE EXISTS`) and `anti_join` (`WHERE NOT EXISTS`) which have no pandas equivalent. All six methods are also available as module-level functions (`from pyduck_janitor import inner_join, ...`).
+
+- [`inner_join()`](docs/api/functions.md#inner_join) - Rows whose key matches on both sides (dplyr `inner_join`)
+- [`left_join()`](docs/api/functions.md#left_join) - All left rows + matched right (NULL on miss) (dplyr `left_join`)
+- [`right_join()`](docs/api/functions.md#right_join) - All right rows + matched left (NULL on miss) (dplyr `right_join`)
+- [`full_join()`](docs/api/functions.md#full_join) - All rows from both sides (NULL on either side) (dplyr `full_join`)
+- [`semi_join()`](docs/api/functions.md#semi_join) - Left rows whose key EXISTS on right (no right columns) (dplyr `semi_join`)
+- [`anti_join()`](docs/api/functions.md#anti_join) - Left rows whose key does NOT exist on right (no right columns) (dplyr `anti_join`)
+
+```python
+import pandas as pd
+from pyduck_janitor import DuckJanitor
+
+employees = DuckJanitor.from_pandas(pd.DataFrame({
+    'id': [1, 2, 3], 'name': ['a', 'b', 'c'], 'dept_id': [10, 20, 30]
+}))
+departments = DuckJanitor.from_pandas(pd.DataFrame({
+    'dept_id': [10, 20, 99], 'dept_name': ['Eng', 'Sales', 'HR']
+}))
+
+# Pull department names onto employees (left side kept entirely)
+employees.left_join(departments, on='dept_id').collect()
+
+# Filter: keep only employees whose department is still active
+active_depts = DuckJanitor.from_pandas(pd.DataFrame({'dept_id': [10, 20]}))
+employees.semi_join(active_depts, on='dept_id').collect()
+
+# Different key names? Use left_on + right_on
+employees.left_join(departments, left_on='dept_id', right_on='dept_id').collect()
+```
+
+All verbs accept `suffixes=('_x', '_y')` to disambiguate colliding non-key columns.
+
 ### pyjanitor parity methods (v0.2.0)
 
 These were added in v0.2.0 to reach 100% coverage of pyjanitor's documented API. Every function in this table has a pyjanitor counterpart — the second column shows how the pyduck-janitor method relates to it (same-name implementation or alias of another pyduck verb). Functions with **no** pyjanitor counterpart are listed separately under [DuckDB-only extensions](#duckdb-only-extensions) — none of them appear in this table.
