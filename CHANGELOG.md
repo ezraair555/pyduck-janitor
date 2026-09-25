@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## 0.3.0 - 2026-09-25
+
 ### Added
 - **dplyr-style explicit join verbs** (`pyduck_janitor.joins` and methods on
   `DuckJanitor`): `inner_join`, `left_join`, `right_join`, `full_join`,
