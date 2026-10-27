@@ -2310,6 +2310,85 @@ class DuckJanitor:
         )
         return DuckJanitor(new_relation, self._connection)
 
+    def optimize_bins_to_target(
+        self,
+        y: str,
+        *,
+        columns=None,
+        method: str = "auto",
+        cv: int = 3,
+        task: str = "auto",
+        cast_to_text: bool = True,
+        suffix: str = "_binned",
+        random_state: int | None = 42,
+        return_diagnostics: bool = False,
+        optbinning_kwargs=None,
+        holdout: bool | float = False,
+        stratify: bool = True,
+        sample_n: int | None = 100_000,
+    ):
+        """Learn supervised bin cuts from a target column.
+
+        Bins each requested numeric column using its relationship with ``y``
+        (two engines: OptBinning for binary targets, DecisionTreeDiscretiser
+        for binary / multiclass / continuous).  Produces text interval labels
+        such as ``(-inf, 26.5]`` by default.  Full reference with examples:
+        ``docs/supervised_binning.md``.
+
+        Parameters
+        ----------
+        y : str
+            Target column (binary, multiclass, or continuous).
+        columns : str or list of str, optional
+            Feature column(s) to bin; default is all numeric non-target columns.
+        method : {'auto','optbinning','tree'}, default 'auto'
+            ``'auto'`` prefers OptBinning for binary y, else the tree.
+        cv : int, default 3
+            CV folds for the tree path (capped by smallest class size).
+        task : {'auto','binary','multiclass','regression'}, default 'auto'
+            Force a target interpretation; validated against the data.
+        cast_to_text : bool, default True
+            Text interval labels vs integer bin ids (1..k).
+        suffix : str, default '_binned'
+            New-column suffix; ``''`` replaces the source column in place.
+        random_state : int or None, default 42
+            Seed for the tree path, sampling, and holdout split.
+        return_diagnostics : bool, default False
+            Also return per-column cuts, method used, and holdout scores.
+        optbinning_kwargs : dict, optional
+            Extra ``OptimalBinning(...)`` kwargs (e.g. ``max_n_bins``).
+        holdout : bool or float, default False
+            Honest train/test scoring; ``True`` means a 20% test split.
+        stratify : bool, default True
+            Stratify the holdout split for discrete targets.
+        sample_n : int or None, default 100_000
+            Row cap for cut learning (CASE still applies to all rows).
+
+        Returns
+        -------
+        DuckJanitor
+            Self for method chaining, with ``<column><suffix>`` added per
+            feature — or ``(DuckJanitor, diagnostics)`` when
+            ``return_diagnostics`` is True (standalone assignment, not mid-chain).
+        """
+        from .bins_opt import optimize_bins_to_target as _obt
+        res = _obt(
+            self._relation, y,
+            columns=columns, method=method, cv=cv, task=task,
+            cast_to_text=cast_to_text, suffix=suffix,
+            random_state=random_state,
+            return_diagnostics=return_diagnostics,
+            optbinning_kwargs=optbinning_kwargs,
+            holdout=holdout, stratify=stratify,
+            sample_n=sample_n,
+            conn=self._connection,
+        )
+        if return_diagnostics:
+            rel, diag = res  # type: ignore[misc]
+            return DuckJanitor(rel, self._connection), diag
+        return DuckJanitor(res, self._connection)
+
+
     def change_type(self, column: str, dtype: str) -> "DuckJanitor":
         """Change the data type of a column.
 
@@ -4384,9 +4463,11 @@ class DuckJanitor:
                 select_list.append(f'"{c}"')
         query = "SELECT " + ", ".join(select_list) + " FROM _union_self"
         new_relation = self._connection.query(query)
-        # Note: full per-column coercion across *all* relations is left to user-level
-        # concat orchestration; this method only coerces the calling relation.
+        # VARCHAR columns come back from DuckDB as pandas StringDtype on
+        # collect() — that is the canonical string storage here (not
+        # object dtype). Callers should check is_string_dtype.
         return DuckJanitor(new_relation, self._connection)
+
 
     # =============================================================
     # pyjanitor parity batch 3 — heavyweight helpers

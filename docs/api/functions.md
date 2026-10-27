@@ -72,6 +72,7 @@ Complete function-by-function reference for every public method on
 | [`transform_column`](#transform_column) | Transform a column using a function or SQL expression | Core cleaning verbs |
 | [`transform_columns`](#transform_columns) | Transform multiple columns using a function or SQL expression | Core cleaning verbs |
 | [`bin_numeric`](#bin_numeric) | Bin a numeric column into discrete intervals | Extended verbs |
+| [`optimize_bins_to_target`](#optimize_bins_to_target) | Learn supervised bin cuts from a target column | Extended verbs |
 | [`change_type`](#change_type) | Change the data type of a column | Extended verbs |
 | [`concatenate_columns`](#concatenate_columns) | Concatenate multiple columns into a single column | Extended verbs |
 | [`deconcatenate_column`](#deconcatenate_column) | Split a column into multiple columns based on a delimiter | Extended verbs |
@@ -1935,6 +1936,61 @@ Self for method chaining, with ``target_column`` added.
 >>> dj = DuckJanitor.from_pandas(df)
 >>> dj.bin_numeric('a', 'a_bin', bins=2).collect()
 ```
+
+
+
+<a id="optimize_bins_to_target"></a>
+### optimize_bins_to_target
+
+Learn supervised bin cuts from a target column.
+
+Bins each requested numeric column using its relationship with ``y``
+(two engines: OptBinning for binary targets, DecisionTreeDiscretiser
+for binary / multiclass / continuous).  Produces text interval labels
+such as ``(-inf, 26.5]`` by default.  Full reference with examples:
+``docs/supervised_binning.md``.
+
+```python
+optimize_bins_to_target(self, y: str, *, columns=None, method: str = 'auto', cv: int = 3, task: str = 'auto', cast_to_text: bool = True, suffix: str = '_binned', random_state: int | None = 42, return_diagnostics: bool = False, optbinning_kwargs=None, holdout: bool | float = False, stratify: bool = True, sample_n: int | None = 100000)
+```
+
+**Parameters**
+
+- **y** — str
+  Target column (binary, multiclass, or continuous).
+- **columns** — str or list of str, optional
+  Feature column(s) to bin; default is all numeric non-target columns.
+- **method** — {'auto','optbinning','tree'}, default 'auto'
+  ``'auto'`` prefers OptBinning for binary y, else the tree.
+- **cv** — int, default 3
+  CV folds for the tree path (capped by smallest class size).
+- **task** — {'auto','binary','multiclass','regression'}, default 'auto'
+  Force a target interpretation; validated against the data.
+- **cast_to_text** — bool, default True
+  Text interval labels vs integer bin ids (1..k).
+- **suffix** — str, default '_binned'
+  New-column suffix; ``''`` replaces the source column in place.
+- **random_state** — int or None, default 42
+  Seed for the tree path, sampling, and holdout split.
+- **return_diagnostics** — bool, default False
+  Also return per-column cuts, method used, and holdout scores.
+- **optbinning_kwargs** — dict, optional
+  Extra ``OptimalBinning(...)`` kwargs (e.g. ``max_n_bins``).
+- **holdout** — bool or float, default False
+  Honest train/test scoring; ``True`` means a 20% test split.
+- **stratify** — bool, default True
+  Stratify the holdout split for discrete targets.
+- **sample_n** — int or None, default 100_000
+  Row cap for cut learning (CASE still applies to all rows).
+
+**Returns**
+
+DuckJanitor
+Self for method chaining, with ``<column><suffix>`` added per
+feature — or ``(DuckJanitor, diagnostics)`` when
+``return_diagnostics`` is True (standalone assignment, not mid-chain).
+
+_No example available._
 
 
 

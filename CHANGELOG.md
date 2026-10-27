@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Supervised binning** (`optimize_bins_to_target`, new module
+  `pyduck_janitor/bins_opt.py`, chainable on `DuckJanitor`): learn optimal
+  cut points for one or more numeric columns from a binary, multiclass, or
+  continuous target. Two engines — OptBinning (IV/WoE-optimal, binary
+  default) and DecisionTreeDiscretiser (all target types) — with honest
+  train/test holdout scoring (`auc`/`f1`/`gini`, `f1_macro`, `r2`/`rmse`),
+  text interval labels, `Missing`-bin preservation, and row-capped learning
+  (`sample_n`) for large tables. Optional install: `pip install
+  "pyduck-janitor[binning]"`. Guide: `docs/supervised_binning.md`;
+  runnable demo: `examples/optimize_bins_example.py`.
+
 ## 0.3.0 - 2026-09-25
 
 ### Added

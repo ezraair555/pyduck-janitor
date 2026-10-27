@@ -375,6 +375,7 @@ GROUPS: list[tuple[str, list[str]]] = [
         "Extended verbs",
         [
             "bin_numeric",
+            "optimize_bins_to_target",
             "change_type",
             "concatenate_columns",
             "deconcatenate_column",

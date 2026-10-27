@@ -139,6 +139,7 @@ pyduck-janitor implements the **complete pyjanitor documented API** (94/94 funct
 
 ### Extended verbs (`cleaning_ops_extended.py`)
 - [`bin_numeric()`](docs/api/functions.md#bin_numeric) - Bin numeric column
+- [`optimize_bins_to_target()`](docs/api/functions.md#optimize_bins_to_target) - Supervised bin cuts from a target ([guide](docs/supervised_binning.md))
 - [`change_type()`](docs/api/functions.md#change_type) - Change column type
 - [`concatenate_columns()`](docs/api/functions.md#concatenate_columns) - Join columns
 - [`deconcatenate_column()`](docs/api/functions.md#deconcatenate_column) - Split column

@@ -470,7 +470,9 @@ class TestUnionize:
         a = DuckJanitor.from_pandas(df1)
         b = DuckJanitor.from_pandas(df2)
         out = a.unionize_dataframe_categories(b).collect()
-        assert out["cat"].dtype == object
+        # DuckDB VARCHAR -> pandas StringDtype on collect(); accept that
+        # as the canonical string storage (not legacy object dtype).
+        assert pd.api.types.is_string_dtype(out["cat"])
 
 
 class TestBatch2Sanity:

@@ -16,6 +16,7 @@
 - `pyduck_janitor/duck_janitor.py`: core relation wrapper and public methods
 - `pyduck_janitor/cleaning_ops.py`: core cleaning verbs
 - `pyduck_janitor/cleaning_ops_extended.py`: extended cleaning/reshape verbs
+- `pyduck_janitor/bins_opt.py`: supervised binning (`optimize_bins_to_target`); guide at `docs/supervised_binning.md`
 - `pyduck_janitor/embeddings.py`: optional vector helpers
 - `pyduck_janitor/text_ops.py`: text and full-text-search helpers
 - `pyduck_janitor/extensions.py`: lazy DuckDB extension loading

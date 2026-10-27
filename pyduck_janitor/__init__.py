@@ -23,6 +23,7 @@ from .cleaning_ops import (
     transform_column,
     transform_columns,
 )
+from .bins_opt import optimize_bins_to_target
 from .cleaning_ops_extended import (
     bin_numeric,
     case_when,
@@ -113,6 +114,7 @@ __all__ = [
     "transform_column",
     "transform_columns",
     "bin_numeric",
+    "optimize_bins_to_target",
     "change_type",
     "concatenate_columns",
     "deconcatenate_column",

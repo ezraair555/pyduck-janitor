@@ -65,6 +65,13 @@ text = [
     # icu + fts ship with the DuckDB Python wheel; this extra is a
     # no-op placeholder kept for install-command stability.
 ]
+binning = [
+    "optbinning>=0.17",
+    "feature_engine>=1.6",
+    "scikit-learn>=1.4",
+    "scipy>=1.11",
+]
+
 
 [project.urls]
 Homepage = "https://github.com/ezraair555/pyduck-janitor"
