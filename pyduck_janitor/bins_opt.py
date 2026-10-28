@@ -13,6 +13,8 @@ tree path is the fallback when y is not binary or when iv is unavailable.
 from __future__ import annotations
 
 import warnings
+warnings.filterwarnings("ignore", message=".*HIGHS.*", category=UserWarning)
+
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import duckdb
@@ -74,6 +76,7 @@ def _tree_splits(
     cv: int = 3,
     task: str = "auto",
     random_state: Optional[int] = 42,
+    suppress_nan_warnings: bool = False,
 ) -> List[float]:
     """Learn splits with a 1-d decision tree.
 
@@ -165,7 +168,14 @@ def _tree_splits(
         clf = DecisionTreeRegressor(max_depth=4, min_samples_leaf=max(2, len(xx)//20), random_state=random_state or 42)
     else:
         clf = DecisionTreeClassifier(max_depth=4, min_samples_leaf=max(2, len(xx)//20), random_state=random_state or 42)
-    clf.fit(xx.reshape(-1, 1), yy)
+    # Optionally suppress nan-score warnings from sklearn internals.
+    # Scope the filter to this call: a bare warnings.filterwarnings() call
+    # mutates the global filter list and leaks into the rest of the
+    # process, silencing unrelated nan warnings program-wide.
+    with warnings.catch_warnings():
+        if suppress_nan_warnings:
+            warnings.filterwarnings("ignore", message=".*nan.*", category=UserWarning)
+        clf.fit(xx.reshape(-1, 1), yy)
     return sorted(float(t) for t in clf.tree_.threshold if t != -2)
 
 
