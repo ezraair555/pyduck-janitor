@@ -4,6 +4,82 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## 0.4.1 - 2026-10-29
+
+Continues the DuckDB-native work from 0.4.0: the remaining verbs that were
+still module-level functions, the set operations, and the remote-file
+support the README had been promising but the package never implemented.
+
+### Added — Chainable text and vector verbs
+`text_normalize`, `build_fts_index`, `drop_fts_index`, `search_text`,
+`keyword_filter`, `embed_column`, `build_vector_index`, `vector_search`, and
+`fuzzy_dedupe` were module-level functions only (`text_normalize(dj, ...)`),
+which broke the chaining contract every other verb follows. Each is now
+also a method on `DuckJanitor`.
+
+- `vector_search()` and `search_text()` accept `return_relation=True` so
+  their results can be chained instead of being forced into a DataFrame.
+- `fuzzy_dedupe()` now stays on the caller's connection rather than
+  silently rebinding the result to the shared in-memory connection.
+
+### Added — Set operations (new `set_ops.py`)
+- `union()`, `intersect()`, `except_()` (alias `except_rows`),
+  `concat_rows()`, and `select_except()`, each also available as a
+  `DuckJanitor` method.
+- `union(..., by_name=True)` uses DuckDB's `UNION BY NAME`, so frames with
+  different column orders combine correctly and unmatched columns become
+  NULL. `UNION ALL BY NAME` is supported by DuckDB 1.5.2 and is used when
+  `all=True`.
+- DuckDB 1.5.2 has no `INTERSECT BY NAME` / `EXCEPT BY NAME`, so those two
+  are emulated by padding both sides to the union of the column sets with
+  typed NULLs. The deviation is documented in the module and in each
+  function's Notes.
+- `select_except()` uses DuckDB's `COLUMNS(* EXCLUDE (...))` and
+  `COLUMNS(* REPLACE (...))` star expressions.
+
+### Added — Remote and S3 support (new `remote.py`)
+The README advertised `from_parquet('s3://bucket/data.parquet')`, but
+nothing in the package loaded DuckDB's `httpfs` extension or configured
+credentials. That claim is now true.
+
+- `load_httpfs()`, `configure_s3()`, `create_s3_secret()`, `read_remote()`,
+  `list_remote()`, and `is_remote_path()`.
+- `httpfs` is registered in `extensions.EXTENSIONS` so the existing loader
+  (and its idempotency cache and error mapping) is reused. It loads
+  offline from the standard DuckDB wheel, so nothing is downloaded
+  implicitly.
+- Credentials travel as **bind parameters**, never interpolated into SQL
+  text, and are never printed or included in an exception message.
+  `configure_s3()` prefers DuckDB's temporary secret manager and falls
+  back to `SET s3_*` statements.
+- `create_s3_secret()` can persist a secret on request; the default is
+  in-memory only, so credentials do not hit disk.
+
+### Fixed
+- Calling a verb without a connection raised
+  `AttributeError: 'NoneType' object has no attribute 'query'`. A shared
+  `_require_conn()` helper now raises a `ValueError` that names the cause
+  and points at the method form on `DuckJanitor`.
+
+### Added — Type checking, and a CI gate for it
+- The package now **type-checks cleanly** under mypy: 130 errors → 0
+  ("Success: no issues found in 16 source files"). A new `typecheck` CI job
+  enforces it, so the surface cannot silently drift back.
+- `embed_install()` crashed on `huggingface_hub` 1.x: the hub removed the
+  `local_dir_use_symlinks` argument in 1.0, so the call raised `TypeError`.
+  The flag is now sent only when the installed hub accepts it.
+- A dead `from duckdb import SQLType` probe in `bins_opt.py` referenced an
+  attribute DuckDB does not have. Its `ImportError` was swallowed, so it did
+  nothing; it has been removed.
+- The `_fts_index` / `_vss_*` attributes are declared **annotation-only** on
+  `DuckJanitor`. An annotation-only class attribute does not exist at
+  runtime, so `hasattr(dj, "_fts_index")` stays False until an index is
+  actually built. Giving them a default would silently change that
+  contract and break the drop-index behaviour.
+- `DuckJanitor.__exit__` returns `None` rather than `False` — equivalent
+  for exception propagation, and what the type checker expects from a
+  context manager.
+
 ## 0.4.0 - 2026-10-29
 
 The release that turns pyduck-janitor from a pandas-backed cleaning library
@@ -106,82 +182,6 @@ formats and destinations:
   `tests/test_property_cleaning_ops.py` and skips cleanly when Hypothesis
   is absent.
 - The public-package contract check now covers every 0.4.0 verb.
-
-## 0.4.1 - 2026-10-29
-
-Continues the DuckDB-native work from 0.4.0: the remaining verbs that were
-still module-level functions, the set operations, and the remote-file
-support the README had been promising but the package never implemented.
-
-### Added — Chainable text and vector verbs
-`text_normalize`, `build_fts_index`, `drop_fts_index`, `search_text`,
-`keyword_filter`, `embed_column`, `build_vector_index`, `vector_search`, and
-`fuzzy_dedupe` were module-level functions only (`text_normalize(dj, ...)`),
-which broke the chaining contract every other verb follows. Each is now
-also a method on `DuckJanitor`.
-
-- `vector_search()` and `search_text()` accept `return_relation=True` so
-  their results can be chained instead of being forced into a DataFrame.
-- `fuzzy_dedupe()` now stays on the caller's connection rather than
-  silently rebinding the result to the shared in-memory connection.
-
-### Added — Set operations (new `set_ops.py`)
-- `union()`, `intersect()`, `except_()` (alias `except_rows`),
-  `concat_rows()`, and `select_except()`, each also available as a
-  `DuckJanitor` method.
-- `union(..., by_name=True)` uses DuckDB's `UNION BY NAME`, so frames with
-  different column orders combine correctly and unmatched columns become
-  NULL. `UNION ALL BY NAME` is supported by DuckDB 1.5.2 and is used when
-  `all=True`.
-- DuckDB 1.5.2 has no `INTERSECT BY NAME` / `EXCEPT BY NAME`, so those two
-  are emulated by padding both sides to the union of the column sets with
-  typed NULLs. The deviation is documented in the module and in each
-  function's Notes.
-- `select_except()` uses DuckDB's `COLUMNS(* EXCLUDE (...))` and
-  `COLUMNS(* REPLACE (...))` star expressions.
-
-### Added — Remote and S3 support (new `remote.py`)
-The README advertised `from_parquet('s3://bucket/data.parquet')`, but
-nothing in the package loaded DuckDB's `httpfs` extension or configured
-credentials. That claim is now true.
-
-- `load_httpfs()`, `configure_s3()`, `create_s3_secret()`, `read_remote()`,
-  `list_remote()`, and `is_remote_path()`.
-- `httpfs` is registered in `extensions.EXTENSIONS` so the existing loader
-  (and its idempotency cache and error mapping) is reused. It loads
-  offline from the standard DuckDB wheel, so nothing is downloaded
-  implicitly.
-- Credentials travel as **bind parameters**, never interpolated into SQL
-  text, and are never printed or included in an exception message.
-  `configure_s3()` prefers DuckDB's temporary secret manager and falls
-  back to `SET s3_*` statements.
-- `create_s3_secret()` can persist a secret on request; the default is
-  in-memory only, so credentials do not hit disk.
-
-### Fixed
-- Calling a verb without a connection raised
-  `AttributeError: 'NoneType' object has no attribute 'query'`. A shared
-  `_require_conn()` helper now raises a `ValueError` that names the cause
-  and points at the method form on `DuckJanitor`.
-
-### Added — Type checking, and a CI gate for it
-- The package now **type-checks cleanly** under mypy: 130 errors → 0
-  ("Success: no issues found in 16 source files"). A new `typecheck` CI job
-  enforces it, so the surface cannot silently drift back.
-- `embed_install()` crashed on `huggingface_hub` 1.x: the hub removed the
-  `local_dir_use_symlinks` argument in 1.0, so the call raised `TypeError`.
-  The flag is now sent only when the installed hub accepts it.
-- A dead `from duckdb import SQLType` probe in `bins_opt.py` referenced an
-  attribute DuckDB does not have. Its `ImportError` was swallowed, so it did
-  nothing; it has been removed.
-- The `_fts_index` / `_vss_*` attributes are declared **annotation-only** on
-  `DuckJanitor`. An annotation-only class attribute does not exist at
-  runtime, so `hasattr(dj, "_fts_index")` stays False until an index is
-  actually built. Giving them a default would silently change that
-  contract and break the drop-index behaviour.
-- `DuckJanitor.__exit__` returns `None` rather than `False` — equivalent
-  for exception propagation, and what the type checker expects from a
-  context manager.
 
 ## 0.3.0 - 2026-09-25
 

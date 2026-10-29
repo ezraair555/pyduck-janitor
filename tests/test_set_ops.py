@@ -462,3 +462,11 @@ class TestNullSemantics:
         rows = {row[0]: row[1] for row in result.fetchall()}
         assert rows[1] == "keep"
         assert rows[2] is None
+
+    def test_union_by_name_all_with_mismatched_columns_preserves_duplicates(self, conn):
+        """UNION ALL BY NAME keeps duplicates even with different columns."""
+        left = _rel(conn, {"a": [1, 1]})
+        right = _rel(conn, {"a": [1], "b": [2]})
+        result = union(left, right, by_name=True, all=True, conn=conn)
+        assert result.columns == ["a", "b"]
+        assert _sorted_rows(result) == [(1, 2), (1, None), (1, None)]

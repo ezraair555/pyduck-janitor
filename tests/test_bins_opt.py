@@ -976,3 +976,22 @@ class TestStandaloneCall:
         df = pd.DataFrame({"y": [0, 1, 0, 1]})
         with pytest.raises(ValueError, match="no work"):
             optimize_bins_to_target(_rel(conn, df), "y", columns=[], conn=conn)
+
+    def test_optbinning_fallback_records_requested_method_and_engine_fallback(self, conn):
+        """Engine downgrade is surfaced via requested_method/engine_fallback."""
+        rs = np.random.RandomState(SEED)
+        df = pd.DataFrame({"feat": rs.normal(size=300), "y": rs.randint(0, 3, 300)})
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            _out, diag = optimize_bins_to_target(
+                _rel(conn, df),
+                "y",
+                columns=["feat"],
+                method="optbinning",
+                return_diagnostics=True,
+                conn=conn,
+            )
+        entry = diag["feat"]
+        assert entry["method"] == "tree"
+        assert entry["requested_method"] == "optbinning"
+        assert entry["engine_fallback"] == "optbinning -> tree"

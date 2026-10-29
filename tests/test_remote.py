@@ -419,3 +419,19 @@ def test_list_remote_raises_extension_not_available_when_httpfs_disabled(tmp_pat
     with pytest.raises(ExtensionNotAvailable) as excinfo:
         list_remote(str(tmp_path / "*.parquet"))
     assert "httpfs" in str(excinfo.value)
+
+
+def test_load_httpfs_offline_does_not_attempt_install(conn, monkeypatch):
+    """Default ``load_httpfs(conn)`` stays offline (no INSTALL attempt)."""
+    import pyduck_janitor.remote as remote_mod
+
+    calls: list[bool] = []
+    real_loader = remote_mod.load_extension
+
+    def spy(c, name, *, install=True, repository=None):
+        calls.append(install)
+        return real_loader(c, name, install=install, repository=repository)
+
+    monkeypatch.setattr(remote_mod, "load_extension", spy)
+    assert load_httpfs(conn) is conn
+    assert calls == [False]
