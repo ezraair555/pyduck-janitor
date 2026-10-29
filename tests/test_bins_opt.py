@@ -156,26 +156,26 @@ class TestNumericBinaryHappyPath:
         assert pd.api.types.is_integer_dtype(binned)
         assert binned.min() >= 1
 
-    def test_cast_to_text_false_with_nulls_is_a_known_bug(self, conn):
-        """KNOWN BUG (not fixed here — reported to the maintainer).
+    def test_cast_to_text_false_with_nulls_produces_numeric_bins(self, conn):
+        """With ``cast_to_text=False`` NULL rows must not break the cast.
 
-        With ``cast_to_text=False`` the CASE still emits the string literal
-        ``'Missing'`` for NULL rows, which DuckDB cannot cast to INT32:
+        Regression test: the CASE used to emit the *string* literal
+        ``'Missing'`` for the NULL branch even when numeric labels were
+        requested, so DuckDB raised
 
             Conversion Error: Could not convert string 'Missing' to INT32
 
-        The label is built by ``_case_sql(..., numeric_labels=True)`` which
-        hardcodes the ``'Missing'`` branch.  The test pins the current
-        (broken) behaviour; it will XPASS once the bug is fixed.
+        on materialisation. The NULL branch is now NULL for numeric labels.
         """
         df = _binary_frame(n=400)
         df.loc[df.index[:20], "feat"] = np.nan
-        with pytest.raises(Exception) as excinfo:
-            out = optimize_bins_to_target(
-                _rel(conn, df), "y", columns=["feat"], cast_to_text=False, conn=conn
-            )
-            out.df()  # the conversion error surfaces on materialisation
-        assert "Missing" in str(excinfo.value)
+        out = optimize_bins_to_target(
+            _rel(conn, df), "y", columns=["feat"], cast_to_text=False, conn=conn
+        )
+        binned = out.df()["feat_binned"]
+        assert pd.api.types.is_integer_dtype(binned)
+        assert binned.isna().sum() == 20
+        assert binned.dropna().min() >= 1
 
     def test_suffix_empty_replaces_in_place(self, conn):
         df = _binary_frame()
@@ -373,7 +373,12 @@ class TestDiagnostics:
             )
         entry = diag["feat"]
         assert "holdout_error" in entry
-        assert "scores_holdout" not in entry
+        # The scores key is now always published, so callers can read
+        # diag[col]["scores_holdout"]["auc"] without a KeyError.
+        # The scores key is now always published, so callers can read
+        # diag[col]["scores_holdout"]["auc"] without a KeyError.
+        assert "scores_holdout" in entry
+        assert math.isnan(entry["scores_holdout"]["auc"])
 
     def test_too_few_rows_for_scoring_reports_note(self, conn):
         rs = np.random.RandomState(SEED)
@@ -753,26 +758,23 @@ class TestErrorPaths:
         assert diag["feat"]["cuts"] == []
         assert set(out.df()["feat_binned"].unique()) == {"Single"}
 
-    def test_negative_sample_n_is_rejected_or_falls_back(self, conn):
+    def test_negative_sample_n_is_rejected(self, conn):
         """A negative sample_n must never silently corrupt the fit.
 
-        The current implementation warns and learns on the full frame
-        (train_test_split refuses a negative train_size), which is safe.
+        Regression test: the value used to be passed straight to
+        ``train_test_split``, which rejected it, so the code caught the
+        exception and fell back to full-data learning with only a warning.
+        A non-positive sample_n is now rejected up front.
         """
         df = _binary_frame(n=300)
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            _out, diag = optimize_bins_to_target(
+        with pytest.raises(ValueError, match="sample_n must be a positive integer"):
+            optimize_bins_to_target(
                 _rel(conn, df),
                 "y",
                 columns=["feat"],
                 sample_n=-1,
-                return_diagnostics=True,
                 conn=conn,
             )
-        assert diag["feat"]["sampled"] is False
-        assert diag["feat"]["fit_rows"] == 300
-        assert any("sampling failed" in str(w.message) for w in caught)
 
     def test_holdout_fraction_out_of_range_raises(self, conn):
         df = _binary_frame(n=300)
@@ -881,11 +883,19 @@ class TestScoreBinnedFeature:
         assert isinstance(scores["r2"], float)
         assert scores["rmse"] >= 0.0
 
-    def test_too_few_rows_returns_note(self):
+    def test_too_few_rows_returns_note_and_metric_keys(self):
+        """A too-small split returns NaN metrics, not a missing key.
+
+        Regression test: the old code returned only ``{"n", "note"}``, so
+        a caller reading ``scores["auc"]`` got a KeyError instead of NaN.
+        """
         x = pd.Series([1.0, 2.0, 3.0])
         y = pd.Series([0, 1, 0])
         scores = _score_binned_feature(x, y, [1.5], "binary")
-        assert scores == {"n": 3, "note": "too few non-null rows for scoring"}
+        assert scores["n"] == 3
+        assert scores["note"] == "too few non-null rows for scoring"
+        for key in ("auc", "f1", "gini", "cramers_v"):
+            assert math.isnan(scores[key]), f"{key} should be NaN"
 
     def test_train_map_is_used_for_holdout_scoring(self):
         rs = np.random.RandomState(SEED)

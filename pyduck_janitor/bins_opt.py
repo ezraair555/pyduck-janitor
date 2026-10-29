@@ -313,8 +313,13 @@ def _case_sql(col_id: str, cuts: List[float], numeric_labels: bool = False) -> s
         last = f"({cuts[-1]}, inf)"
         label = len(cuts) + 1 if numeric_labels else last
         parts.append(f"WHEN {col_id} > {_sql_literal(cuts[-1])} THEN {_sql_literal(label)}")
-    # NULL -> Missing (preserves information)
+    # NULL -> "Missing" (preserves information). When the caller asked for
+    # numeric labels, the NULL branch must stay numeric too: emitting the
+    # string 'Missing' made DuckDB raise
+    # "Could not convert string 'Missing' to INT32" on materialisation.
     other_label = "Other" if cuts else "Single"
+    if numeric_labels:
+        return "CASE " + " ".join(parts) + f" WHEN {col_id} IS NULL THEN NULL END"
     return (
         "CASE "
         + " ".join(parts)
@@ -404,7 +409,17 @@ def _score_binned_feature(
     mask = y.notna() & bins.notna()
     yv, bv = y[mask], bins[mask]
     if len(yv) < 10:
-        return {"n": int(len(yv)), "note": "too few non-null rows for scoring"}
+        # Every metric key is present so callers can read them uniformly
+        # instead of hitting a KeyError on a small or degenerate split.
+        return {
+            "auc": float("nan"),
+            "f1": float("nan"),
+            "gini": float("nan"),
+            "cramers_v": float("nan"),
+            "n_bins": int(bv.nunique()),
+            "n": int(len(yv)),
+            "note": "too few non-null rows for scoring",
+        }
     if y_kind == "binary":
         # per-bin p(event) -> use as "proba" proxy to compute AUC/f1
         # Factorize non-numeric y to 0/1 (sorted classes) so mean/AUC work.
@@ -662,6 +677,10 @@ def optimize_bins_to_target(
         _total_n = conn.execute(f"SELECT COUNT(*) FROM {tbl_all}").fetchone()[0]
     except Exception:
         _total_n = None
+    if sample_n is not None and sample_n <= 0:
+        raise ValueError(
+            f"optimize_bins_to_target: sample_n must be a positive integer or None, got {sample_n!r}."
+        )
     df_all = conn.execute(f"SELECT {sel} FROM {tbl_all}").df()
     _sampled = False
     if sample_n is not None and len(df_all) > sample_n:
@@ -725,6 +744,12 @@ def optimize_bins_to_target(
             "sampled": _sampled,
             "total_rows": _total_n,
         }
+        # Surface an engine downgrade in the diagnostics. A caller who asked
+        # for method="optbinning" and received "tree" should be able to see
+        # that from the result, not only from a warning on stderr.
+        _entry["requested_method"] = method
+        if used != method and method in ("optbinning", "auto"):
+            _entry["engine_fallback"] = f"{method} -> {used}"
         if used == "optbinning":
             if optbinning_kwargs and "solver" in optbinning_kwargs:
                 _entry["solver"] = optbinning_kwargs["solver"]
@@ -772,6 +797,18 @@ def optimize_bins_to_target(
                 )
             except Exception as e:
                 diag[col]["holdout_error"] = str(e)
+                # Always publish the scores key so callers can read
+                # diag[col]["scores_holdout"]["auc"] without a KeyError,
+                # whichever way the holdout failed.
+                diag[col]["scores_holdout"] = {
+                    "auc": float("nan"),
+                    "f1": float("nan"),
+                    "gini": float("nan"),
+                    "cramers_v": float("nan"),
+                    "n_bins": 0,
+                    "n": 0,
+                    "error": str(e),
+                }
                 continue
             cuts_per_col[col] = cuts_tr
             diag[col]["cuts"] = cuts_tr
