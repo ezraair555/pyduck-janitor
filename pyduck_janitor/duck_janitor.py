@@ -131,6 +131,18 @@ class DuckJanitor:
     _shared_conn: Optional[duckdb.DuckDBPyConnection] = None
     _shared_conn_lock = threading.Lock()
 
+    # Stashed by the optional text/vector verbs so a later search can find
+    # the index that was created. These are declared without a value on
+    # purpose: an annotation-only class attribute does not exist at runtime,
+    # so ``hasattr(dj, "_fts_index")`` is False until an index is actually
+    # built. Giving them a default would silently change that contract.
+    _fts_index: Optional[str]
+    _fts_table: Optional[str]
+    _vss_index: Optional[str]
+    _vss_metric: Optional[str]
+    _vss_embedding_column: Optional[str]
+    _vss_table: Optional[str]
+
     @classmethod
     def get_shared_connection(cls) -> duckdb.DuckDBPyConnection:
         """Get or create the global shared DuckDB connection.
@@ -325,7 +337,7 @@ class DuckJanitor:
         """
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> bool:
+    def __exit__(self, exc_type, exc, tb) -> None:
         """Close the session when leaving a ``with`` block.
 
         Parameters
@@ -339,11 +351,11 @@ class DuckJanitor:
 
         Returns
         -------
-        bool
-            False, so exceptions propagate.
+        None
+            Returning None (rather than False) means exceptions propagate.
         """
         self.close()
-        return False
+        return None
 
     def __init__(
         self,
@@ -618,9 +630,9 @@ class DuckJanitor:
         >>> dj = DuckJanitor.from_excel('report.xls', sheet_name='Summary')
         >>> dj = DuckJanitor.from_excel('data.xlsx', usecols='A:D', skiprows=2)
         """
-        df = pd.read_excel(
+        df = pd.read_excel(  # type: ignore[call-overload, misc]
             str(path),
-            sheet_name=sheet_name,
+            sheet_name=sheet_name,  # type: ignore[arg-type]
             header=header,
             usecols=usecols,
             skiprows=skiprows,
@@ -628,7 +640,7 @@ class DuckJanitor:
             na_values=na_values,
             keep_default_na=keep_default_na,
             dtype=dtype,
-            engine=engine,
+            engine=engine,  # type: ignore[arg-type]
             **kwargs,
         )
         # If sheet_name=None, pandas returns a dict of DataFrames.
@@ -637,8 +649,8 @@ class DuckJanitor:
                 raise ValueError(f"Excel file '{path}' contains no sheets.")
             # Take the first sheet deterministically.
             first_key = next(iter(df))
-            df = df[first_key]
-        return cls.from_pandas(df, connection=connection)
+            df = df[first_key]  # type: ignore[assignment]
+        return cls.from_pandas(df, connection=connection)  # type: ignore[arg-type]
 
     @classmethod
     def from_database(
@@ -991,7 +1003,8 @@ class DuckJanitor:
         tuple
             ``(rows, columns)``.
         """
-        return tuple(self._relation.shape)
+        rows, cols = self._relation.shape
+        return (int(rows), int(cols))
 
     @property
     def relation(self) -> duckdb.DuckDBPyRelation:
@@ -1745,7 +1758,7 @@ class DuckJanitor:
         """
         from .set_ops import union as _union
 
-        relation = _union(self, other, by_name=by_name, all=all, conn=self._connection)
+        relation = _union(self, other, by_name=by_name, all=all, conn=self._connection)  # type: ignore[arg-type]
         return DuckJanitor(relation, self._connection)
 
     def intersect(self, other: "DuckJanitor", *, by_name: bool = False) -> "DuckJanitor":
@@ -1765,7 +1778,7 @@ class DuckJanitor:
         """
         from .set_ops import intersect as _intersect
 
-        relation = _intersect(self, other, by_name=by_name, conn=self._connection)
+        relation = _intersect(self, other, by_name=by_name, conn=self._connection)  # type: ignore[arg-type]
         return DuckJanitor(relation, self._connection)
 
     def except_(self, other: "DuckJanitor", *, by_name: bool = False) -> "DuckJanitor":
@@ -1785,7 +1798,7 @@ class DuckJanitor:
         """
         from .set_ops import except_ as _except_
 
-        relation = _except_(self, other, by_name=by_name, conn=self._connection)
+        relation = _except_(self, other, by_name=by_name, conn=self._connection)  # type: ignore[arg-type]
         return DuckJanitor(relation, self._connection)
 
     def concat_rows(self, others: list["DuckJanitor"], *, by_name: bool = True) -> "DuckJanitor":
@@ -1805,7 +1818,7 @@ class DuckJanitor:
         """
         from .set_ops import concat_rows as _concat_rows
 
-        relation = _concat_rows(self, others, by_name=by_name, conn=self._connection)
+        relation = _concat_rows(self, others, by_name=by_name, conn=self._connection)  # type: ignore[arg-type]
         return DuckJanitor(relation, self._connection)
 
     def select_except(
@@ -3093,7 +3106,7 @@ class DuckJanitor:
             group_clause = f"GROUPING SETS ({', '.join(rendered)})"
         else:
             group_clause = ", ".join(self._quote(column) for column in dimensions)
-        select_parts = []
+        select_parts: list[str] = []
         for column in dimensions:
             quoted = self._quote(column)
             if totals is None:
@@ -3478,14 +3491,14 @@ class DuckJanitor:
             null_predicate = " OR ".join(f"{self._quote(column)} IS NULL" for column in key_list)
             null_count = self._connection.sql(
                 f"SELECT COUNT(*) FROM {self._quote(relation_name)} WHERE {null_predicate}"
-            ).fetchone()[0]
+            ).fetchone()[0]  # type: ignore[index]
             if null_count:
                 raise ValueError(f"validate_keys(): key columns contain {null_count} NULL row(s)")
         if unique:
             duplicate_count = self._connection.sql(
                 f"SELECT COUNT(*) - COUNT(DISTINCT ({quoted_keys})) "
                 f"FROM {self._quote(relation_name)}"
-            ).fetchone()[0]
+            ).fetchone()[0]  # type: ignore[index]
             if duplicate_count:
                 raise ValueError(
                     f"validate_keys(): key columns contain {duplicate_count} duplicate row(s)"
@@ -3503,7 +3516,7 @@ class DuckJanitor:
             out_of_range = self._connection.sql(
                 f"SELECT COUNT(*) FROM {self._quote(relation_name)} "
                 f"WHERE {' OR '.join(date_predicates)}"
-            ).fetchone()[0]
+            ).fetchone()[0]  # type: ignore[index]
             if out_of_range:
                 raise ValueError(f"validate_keys(): {out_of_range} row(s) fall outside date bounds")
         return self
@@ -3579,10 +3592,10 @@ class DuckJanitor:
         predicates = [where] if where else []
         if exclude_ids:
             values = ", ".join(self._sql_value(value) for value in exclude_ids)
-            predicates.append(f"{self._quote(id_col)} NOT IN ({values})")
+            predicates.append(f"{self._quote(str(id_col))} NOT IN ({values})")
         if exclude_regex:
             predicates.append(
-                f"NOT regexp_matches(CAST({self._quote(id_col)} AS VARCHAR), "
+                f"NOT regexp_matches(CAST({self._quote(str(id_col))} AS VARCHAR), "
                 f"{self._sql_value(exclude_regex)})"
             )
         if min_records is not None:
@@ -3591,7 +3604,7 @@ class DuckJanitor:
         if min_records is not None:
             query = (
                 f"WITH counted AS (SELECT {selected}, "
-                f"COUNT(*) OVER (PARTITION BY {self._quote(id_col)}) AS __pyduck_noise_count "
+                f"COUNT(*) OVER (PARTITION BY {self._quote(str(id_col))}) AS __pyduck_noise_count "
                 f"FROM {self._quote(relation_name)}) SELECT {selected} FROM counted "
                 f"WHERE {' AND '.join(predicates)}"
             )
@@ -3854,7 +3867,7 @@ class DuckJanitor:
                 ordering = shared_order
                 expression_frame = frame
             elif isinstance(specification, dict):
-                expression = specification.get("expression")
+                expression = specification.get("expression")  # type: ignore[assignment]
                 if not isinstance(expression, str) or not expression.strip():
                     raise ValueError(f"window_mutate(): {name!r} needs a non-empty expression")
                 partition = normalize_columns(
@@ -4083,7 +4096,7 @@ class DuckJanitor:
         if return_diagnostics:
             rel, diag = res  # type: ignore[misc]
             return DuckJanitor(rel, self._connection), diag
-        return DuckJanitor(res, self._connection)
+        return DuckJanitor(res, self._connection)  # type: ignore[arg-type]
 
     def change_type(self, column: str, dtype: str) -> "DuckJanitor":
         """Change the data type of a column.
@@ -5756,7 +5769,7 @@ class DuckJanitor:
 
     @staticmethod
     def _quote(col: str) -> str:
-        return f'"{col.replace(chr(34), chr(34) * 2)}"'
+        return f'"{str(col).replace(chr(34), chr(34) * 2)}"'
 
     @staticmethod
     def _sql_value(v) -> str:
@@ -6445,7 +6458,7 @@ class DuckJanitor:
             self._connection.register(src_name, t._relation)
             registered.append((src_name, list(t._relation.columns)))
         seen_names: dict[str, int] = {}
-        select_parts = []
+        select_parts: list[str] = []
         for src_name, cols in registered:
             for c in cols:
                 if c in seen_names:
@@ -6603,7 +6616,7 @@ class DuckJanitor:
                 raise ValueError(f"summarise(): unknown group_by columns {missing}")
         temp_name = _temp_name("_summarise")
         self._connection.register(temp_name, self._relation)
-        select_parts = []
+        select_parts: list[str] = []
         if group_by:
             select_parts.extend(self._quote(c) for c in group_by)
         for new_col, (src, agg) in agg_spec.items():

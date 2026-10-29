@@ -109,6 +109,27 @@ exclude_also = [
     "if _?importorskip",
 ]
 
+[tool.mypy]
+files = ["pyduck_janitor"]
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = false
+no_implicit_optional = false
+check_untyped_defs = false
+# Optional heavy dependencies ship no type information.
+[[tool.mypy.overrides]]
+module = [
+    "sklearn.*",
+    "scipy.*",
+    "optbinning.*",
+    "ortools.*",
+    "sentence_transformers.*",
+    "huggingface_hub.*",
+    "pyarrow.*",
+    "polars.*",
+]
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

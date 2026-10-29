@@ -342,7 +342,7 @@ def _star_set_sql(
 
 
 def union(
-    relation: duckdb.DuckDBPyRelation,
+    relation: Any,
     other: duckdb.DuckDBPyRelation,
     *,
     by_name: bool = False,
@@ -415,7 +415,7 @@ def union(
 
 
 def intersect(
-    relation: duckdb.DuckDBPyRelation,
+    relation: Any,
     other: duckdb.DuckDBPyRelation,
     *,
     by_name: bool = False,
@@ -490,7 +490,7 @@ def intersect(
 
 
 def except_(
-    relation: duckdb.DuckDBPyRelation,
+    relation: Any,
     other: duckdb.DuckDBPyRelation,
     *,
     by_name: bool = False,
@@ -567,7 +567,7 @@ except_rows = except_
 
 
 def concat_rows(
-    relation: duckdb.DuckDBPyRelation,
+    relation: Any,
     others: list[duckdb.DuckDBPyRelation],
     *,
     by_name: bool = True,
@@ -651,7 +651,7 @@ def concat_rows(
 
 
 def select_except(
-    relation: duckdb.DuckDBPyRelation,
+    relation: Any,
     columns: Union[str, list[str]],
     *,
     replace: Optional[dict[str, str]] = None,

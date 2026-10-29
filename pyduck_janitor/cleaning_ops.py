@@ -208,7 +208,7 @@ def clean_names(
         raise ValueError("case_type must be one of: 'lower', 'upper', 'original'")
     old_columns = relation.columns
 
-    new_columns = []
+    new_columns: list[tuple[str, str]] = []
     for col in old_columns:
         new_name = col
 
@@ -259,6 +259,7 @@ def clean_names(
     # Build SELECT statement with renamed columns
     select_parts = [f"{_quote_id(old)} AS {_quote_id(new)}" for old, new in new_columns]
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     query = f"SELECT {', '.join(select_parts)} FROM {table_name}"
 
     return conn.query(query)
@@ -300,6 +301,7 @@ def remove_columns(
 
     select_parts = [_quote_id(col) for col in keep_columns]
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     query = f"SELECT {', '.join(select_parts)} FROM {table_name}"
 
     return conn.query(query)
@@ -338,6 +340,7 @@ def add_column(
     if isinstance(values, str):
         # Could be a SQL expression, a column name, or a literal string.
         table_name = _register_relation(conn, relation)
+        conn = _require_conn(conn)
         # Try executing as SQL expression/column first.
         # Validate the fragment only when we attempt SQL interpretation.
         try:
@@ -382,11 +385,12 @@ def add_column(
             else:
                 values = values + [None] * (len(df) - len(values))
         df[column_name] = values[: len(df)]
-        return conn.from_df(df)
+        return conn.from_df(df)  # type: ignore[union-attr]
     else:
         # Scalar value
         literal_val = _sql_literal(values)
         table_name = _register_relation(conn, relation)
+        conn = _require_conn(conn)
         query = f"SELECT *, {literal_val} AS {_quote_id(column_name)} FROM {table_name}"
         return conn.query(query)
 
@@ -430,6 +434,8 @@ def rename_column(
             select_parts.append(_quote_id(col))
 
     table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
     query = f"SELECT {', '.join(select_parts)} FROM {table_name}"
 
     return conn.query(query)
@@ -459,6 +465,7 @@ def dropna(
         Relation with missing values removed.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
 
     if subset is None:
         subset = relation.columns
@@ -501,6 +508,7 @@ def remove_empty(
         Relation with empty rows/columns removed.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     old_columns = relation.columns
     non_empty_cols = []
 
@@ -511,7 +519,7 @@ def remove_empty(
             f"WHERE {_quote_id(col)} IS NOT NULL "
             f"AND CAST({_quote_id(col)} AS VARCHAR) != ''"
         )
-        result = conn.execute(query).fetchone()[0]
+        result = conn.execute(query).fetchone()[0]  # type: ignore[index]
         if result > 0:
             non_empty_cols.append(col)
 
@@ -565,9 +573,11 @@ def filter_column(
                 "Callable criteria must return a mask with the same row count as the input relation."
             )
         df = df[mask]
-        return conn.from_df(df)
+        return conn.from_df(df)  # type: ignore[union-attr]
 
     table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
     if isinstance(criteria, str):
         _validate_sql_fragment(criteria, context="Filter criteria")
         # Try executing as raw SQL WHERE clause first
@@ -617,6 +627,7 @@ def coalesce(
         Relation with coalesced column.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     if not columns:
         raise ValueError("columns must contain at least one column")
     _ensure_columns_exist(relation.columns, columns)
@@ -661,6 +672,7 @@ def encode_categorical(
         Relation with encoded column.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     _ensure_columns_exist(relation.columns, [column])
 
     if col_name is None:
@@ -702,6 +714,7 @@ def get_dummies(
         Relation with dummy columns.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
 
     if isinstance(columns, str):
         columns = [columns]
@@ -777,6 +790,8 @@ def select_columns(
     import re as _re
 
     table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
 
     # pyjanitor ``DropLabel`` parity: DropLabel entries exclude columns.
     from .duck_janitor import DropLabel
@@ -873,6 +888,7 @@ def select_rows(
         Relation with selected rows.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
 
     if indices is not None and criteria is None:
         # Select by row indices
@@ -944,6 +960,7 @@ def transform_column(
         # For callable, we need to use a different approach
         # Convert to pandas, apply function, convert back
         table_name = _register_relation(conn, relation)
+        conn = _require_conn(conn)
         query = f"SELECT * FROM {table_name}"
         df = conn.query(query).fetchdf()
 
@@ -952,9 +969,11 @@ def transform_column(
 
         df[target_column] = df[column].apply(func)
 
-        return conn.from_df(df)
+        return conn.from_df(df)  # type: ignore[union-attr]
 
     table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
 
     if target_column is None or target_column == column:
         # Replace the column
@@ -1050,6 +1069,7 @@ def filter_on(
         Filtered relation.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     _validate_sql_fragment(criteria, context="Filter criteria")
 
     if complement:
@@ -1095,6 +1115,7 @@ def filter_string(
         Filtered relation.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     _ensure_columns_exist(relation.columns, [column])
     col = _quote_id(column)
     pat = _sql_literal(search_string)

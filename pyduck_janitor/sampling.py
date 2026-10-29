@@ -188,7 +188,12 @@ def _create_udf(
     """Create a DuckDB scalar UDF, translating DuckDB errors into ValueError."""
     for attempt in range(2):
         try:
-            conn.create_function(name, func, parameters=param_types, return_type=return_type)
+            conn.create_function(
+                name,
+                func,
+                parameters=list(param_types) if param_types else None,
+                return_type=return_type,
+            )
             return
         except duckdb.NotImplementedException as exc:
             message = str(exc)

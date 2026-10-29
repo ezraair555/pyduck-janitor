@@ -90,10 +90,10 @@ def _normalize_keys(
     # left_on / right_on path
     if isinstance(left_on, str):
         left_keys = [left_on]
-        right_keys = [right_on] if isinstance(right_on, str) else list(right_on)
+        right_keys = [right_on] if isinstance(right_on, str) else list(right_on or [])
     else:
-        left_keys = list(left_on)
-        right_keys = list(right_on)
+        left_keys = list(left_on or [])
+        right_keys = list(right_on or [])
     if not left_keys or not right_keys:
         raise ValueError("`left_on` and `right_on` must each contain at least one column.")
     if len(left_keys) != len(right_keys):
@@ -328,7 +328,7 @@ def left_join(
     right_on: Union[str, Sequence[str], None] = None,
     suffixes: tuple[str, str] = ("_x", "_y"),
     conn: Optional[duckdb.DuckDBPyConnection] = None,
-) -> DuckJanitor_type:
+) -> "DuckJanitor":
     """Keep every row from the left side; match keys on the right; NULL on miss.
 
     R equivalent: ``dplyr::left_join``. pandas equivalent: ``pd.merge(how='left')``.
@@ -345,7 +345,7 @@ def right_join(
     right_on: Union[str, Sequence[str], None] = None,
     suffixes: tuple[str, str] = ("_x", "_y"),
     conn: Optional[duckdb.DuckDBPyConnection] = None,
-) -> DuckJanitor_type:
+) -> "DuckJanitor":
     """Keep every row from the right side; match keys on the left; NULL on miss.
 
     R equivalent: ``dplyr::right_join``. pandas equivalent: ``pd.merge(how='right')``.
@@ -362,7 +362,7 @@ def full_join(
     right_on: Union[str, Sequence[str], None] = None,
     suffixes: tuple[str, str] = ("_x", "_y"),
     conn: Optional[duckdb.DuckDBPyConnection] = None,
-) -> DuckJanitor_type:
+) -> "DuckJanitor":
     """Keep every row from both sides; NULL on either side for unmatched keys.
 
     R equivalent: ``dplyr::full_join``. pandas equivalent: ``pd.merge(how='outer')``.
@@ -372,7 +372,10 @@ def full_join(
 
 # Late binding to avoid forward-reference for the type alias used in the
 # signatures above. Python evaluates annotations lazily for ``__future__``.
-DuckJanitor_type = "DuckJanitor"
+if TYPE_CHECKING:
+    DuckJanitor_type = "DuckJanitor"
+else:
+    DuckJanitor_type = str
 
 
 def semi_join(
@@ -383,7 +386,7 @@ def semi_join(
     left_on: Union[str, Sequence[str], None] = None,
     right_on: Union[str, Sequence[str], None] = None,
     conn: Optional[duckdb.DuckDBPyConnection] = None,
-) -> DuckJanitor_type:
+) -> "DuckJanitor":
     """Return left rows whose key EXISTS on right (no right columns added).
 
     R equivalent: ``dplyr::semi_join``. No pandas equivalent (use ``isin``).
@@ -435,7 +438,7 @@ def anti_join(
     left_on: Union[str, Sequence[str], None] = None,
     right_on: Union[str, Sequence[str], None] = None,
     conn: Optional[duckdb.DuckDBPyConnection] = None,
-) -> DuckJanitor_type:
+) -> "DuckJanitor":
     """Return left rows whose key does NOT exist on right (no right columns added).
 
     R equivalent: ``dplyr::anti_join``. No pandas equivalent (``~df.isin(...)``).

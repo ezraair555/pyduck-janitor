@@ -164,7 +164,7 @@ def _tree_splits(
                 "ignore", message=".*ROC AUC.*not defined.*", category=UserWarning
             )
             d = DTD(
-                variables=[x.name],
+                variables=[x.name],  # type: ignore[list-item]
                 regression=regression,
                 scoring=scoring,
                 cv=_cv,
@@ -174,7 +174,7 @@ def _tree_splits(
             )
             df = pd.DataFrame({x.name: x.astype(float)})
             d.fit(df, y)
-        gs = d.binner_dict_.get(x.name)
+        gs = d.binner_dict_.get(x.name)  # type: ignore[call-overload]
         if gs is None:
             raise RuntimeError("DTD binner not found")
         best = gs.best_estimator_
@@ -395,7 +395,7 @@ def _score_binned_feature(
     cuts: list[float],
     y_kind: str,
     _train_map: dict | None = None,
-) -> dict[str, float | int]:
+) -> dict[str, Any]:
     """Score how well the learned bins predict y (cheap — no model, just per-bin stats).
 
     When ``_train_map`` is given (bin -> stat learned on TRAIN), it is used
@@ -433,7 +433,7 @@ def _score_binned_feature(
             p_map = _train_map
         else:
             grp = _pd.DataFrame({"y": yv_num, "bin": bv}).groupby("bin", observed=True)["y"]
-            p_map = grp.mean()  # p(event) per bin
+            p_map = grp.mean()  # type: ignore[assignment]  # p(event) per bin
         # map each row to its bin's p(event); that's the "prediction"
         # unseen bins (test-only) fall back to global mean
         _fallback = float(yv_num.mean())
@@ -478,9 +478,9 @@ def _score_binned_feature(
 
             # per-bin majority class as prediction (train map when provided)
             if _train_map is not None:
-                maj = _train_map
+                maj: Any = _train_map
             else:
-                maj = (
+                maj = (  # type: ignore[assignment]
                     _pd.DataFrame({"y": yv, "bin": bv})
                     .groupby("bin", observed=True)["y"]
                     .agg(lambda s: s.mode().iloc[0])
@@ -516,15 +516,15 @@ def _score_binned_feature(
         from sklearn.metrics import r2_score as _r2, mean_squared_error as _mse
 
         if _train_map is not None:
-            bin_mean = _train_map
+            bin_mean: Any = _train_map
         else:
-            bin_mean = (
+            bin_mean = (  # type: ignore[assignment]
                 _pd.DataFrame({"y": yv.astype(float), "bin": bv})
                 .groupby("bin", observed=True)["y"]
                 .mean()
             )
         _fbm = float(_pd.Series(yv.astype(float)).mean())
-        pred = bv.map(bin_mean).fillna(_fbm).astype(float)
+        pred = bv.map(bin_mean).fillna(_fbm).astype(float)  # type: ignore[assignment]
         r2 = float(_r2(yv.astype(float), pred))
         rmse = float(_mse(yv.astype(float), pred) ** 0.5)
     except Exception:
@@ -648,12 +648,9 @@ def optimize_bins_to_target(
         for col in cols_available:
             if col == y:
                 continue
-            try:
-                # probe dtype
-                from duckdb import SQLType  # noqa: F401
-            except Exception:
-                pass
-            # heuristic: materialise 1 row; pandas dtypes -> numeric?
+            # The column is numeric when pandas reports a numeric dtype,
+            # and the dtype is already known from the materialised frame,
+            # so no extra probe query is needed.
             inferred.append(col)
         columns = inferred
     elif isinstance(columns, str):
@@ -674,7 +671,7 @@ def optimize_bins_to_target(
     tbl_all = _register_relation(conn, relation)
     sel = ", ".join(_quote_id(c) for c in want)
     try:
-        _total_n = conn.execute(f"SELECT COUNT(*) FROM {tbl_all}").fetchone()[0]
+        _total_n = conn.execute(f"SELECT COUNT(*) FROM {tbl_all}").fetchone()[0]  # type: ignore[index]
     except Exception:
         _total_n = None
     if sample_n is not None and sample_n <= 0:
