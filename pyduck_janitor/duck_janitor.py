@@ -5,14 +5,41 @@ This module provides the DuckJanitor class that wraps DuckDB relations
 and provides a method-chaining API for data cleaning operations.
 """
 
+import contextlib
+import io
 import re
 import re as _re_mod
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional, Union
 
 import duckdb
 import pandas as pd
+from ._sqlutil import substitute_self
+from ._sqlutil import temp_name as _temp_name
+
+
+def _escape_html(text: str) -> str:
+    """Escape *text* for safe inclusion in an HTML fragment.
+
+    Parameters
+    ----------
+    text : str
+        The raw text.
+
+    Returns
+    -------
+    str
+        The escaped text.
+    """
+    return (
+        str(text)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
 
 
 class patterns(str):  # noqa: N801
@@ -102,10 +129,15 @@ class DuckJanitor:
     """
 
     _shared_conn: Optional[duckdb.DuckDBPyConnection] = None
+    _shared_conn_lock = threading.Lock()
 
     @classmethod
     def get_shared_connection(cls) -> duckdb.DuckDBPyConnection:
         """Get or create the global shared DuckDB connection.
+
+        The connection is created under a lock so that concurrent first use
+        from multiple threads cannot create two connections and leave one
+        orphaned.
 
         Returns
         -------
@@ -113,8 +145,205 @@ class DuckJanitor:
             The shared in-memory DuckDB connection, lazily created on first call.
         """
         if cls._shared_conn is None:
-            cls._shared_conn = duckdb.connect()
+            with cls._shared_conn_lock:
+                if cls._shared_conn is None:
+                    cls._shared_conn = duckdb.connect()
         return cls._shared_conn
+
+    @classmethod
+    def connect(
+        cls, path: Optional[Union[str, Path]] = None, *, read_only: bool = False
+    ) -> "DuckJanitor":
+        """Open a DuckDB connection and return a session bound to it.
+
+        This is the entry point for persistent, file-backed work. When
+        *path* is ``None`` an in-memory database is used. Unlike the
+        classmethods that build a relation, the returned object exposes the
+        connection itself so you can create tables, attach other databases,
+        and browse the catalog.
+
+        Parameters
+        ----------
+        path : str or Path, optional
+            Path to a DuckDB database file. Created if it does not exist.
+            ``None`` (default) opens an in-memory database.
+        read_only : bool, optional
+            Open the database read-only. Default is False.
+
+        Returns
+        -------
+        DuckJanitor
+            A session object whose ``.connection`` is the new connection and
+            whose relation is an empty ``session`` relation.
+
+        Examples
+        --------
+        >>> with DuckJanitor.connect('warehouse.duckdb') as db:
+        ...     dj = db.from_csv('sales.csv')
+        ...     dj.clean_names().to_table('clean_sales')
+        """
+        if path is None:
+            conn = duckdb.connect()
+        else:
+            target = Path(path)
+            if target.parent and str(target.parent) not in ("", "."):
+                target.parent.mkdir(parents=True, exist_ok=True)
+            conn = duckdb.connect(str(target), read_only=read_only)
+        relation = conn.sql("SELECT 1 AS _session")
+        session = cls(relation, connection=conn)
+        return session
+
+    def attach(
+        self,
+        path: Union[str, Path],
+        alias: str,
+        *,
+        read_only: bool = False,
+    ) -> "DuckJanitor":
+        """Attach another DuckDB database file to this session.
+
+        Parameters
+        ----------
+        path : str or Path
+            Path to the DuckDB database file to attach.
+        alias : str
+            Catalog alias the database is exposed under.
+        read_only : bool, optional
+            Attach read-only. Default is False.
+
+        Returns
+        -------
+        DuckJanitor
+            This object, so the call can stay inside a chain.
+
+        Raises
+        ------
+        ValueError
+            If the alias is not a plain identifier.
+        """
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", alias):
+            raise ValueError(f"attach(): alias must be a plain identifier. Got {alias!r}.")
+        escaped = str(path).replace("'", "''")
+        mode = " (READ_ONLY)" if read_only else ""
+        self._connection.execute(f"ATTACH '{escaped}' AS {alias}{mode}")
+        return self
+
+    def detach(self, alias: str) -> "DuckJanitor":
+        """Detach a previously attached database.
+
+        Parameters
+        ----------
+        alias : str
+            The catalog alias to detach.
+
+        Returns
+        -------
+        DuckJanitor
+            This object.
+        """
+        self._connection.execute(f"DETACH {alias}")
+        return self
+
+    def tables(self) -> list[str]:
+        """List the tables and views in the current catalog.
+
+        Returns
+        -------
+        list of str
+            Fully qualified table names.
+        """
+        rows = self._connection.execute(
+            "SELECT schema_name || '.' || table_name FROM duckdb_tables() "
+            "UNION ALL "
+            "SELECT schema_name || '.' || view_name FROM duckdb_views() "
+            "WHERE NOT internal ORDER BY 1"
+        ).fetchall()
+        return [row[0] for row in rows]
+
+    def databases(self) -> list[str]:
+        """List the attached databases.
+
+        Returns
+        -------
+        list of str
+            Database names.
+        """
+        rows = self._connection.execute(
+            "SELECT database_name FROM duckdb_databases() ORDER BY 1"
+        ).fetchall()
+        return [row[0] for row in rows]
+
+    def begin(self) -> "DuckJanitor":
+        """Begin an explicit transaction on this session's connection.
+
+        Returns
+        -------
+        DuckJanitor
+            This object.
+        """
+        self._connection.begin()
+        return self
+
+    def commit(self) -> "DuckJanitor":
+        """Commit the current transaction.
+
+        Returns
+        -------
+        DuckJanitor
+            This object.
+        """
+        self._connection.commit()
+        return self
+
+    def rollback(self) -> "DuckJanitor":
+        """Roll back the current transaction.
+
+        Returns
+        -------
+        DuckJanitor
+            This object.
+        """
+        self._connection.rollback()
+        return self
+
+    def close(self) -> None:
+        """Close this session's connection.
+
+        The shared in-memory connection is never closed by this method,
+        because other objects may still depend on it.
+        """
+        if self._connection is not DuckJanitor.get_shared_connection():
+            self._connection.close()
+
+    def __enter__(self) -> "DuckJanitor":
+        """Enter a ``with`` block, returning this session.
+
+        Returns
+        -------
+        DuckJanitor
+            This object.
+        """
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        """Close the session when leaving a ``with`` block.
+
+        Parameters
+        ----------
+        exc_type : type or None
+            The exception type, if any.
+        exc : BaseException or None
+            The exception, if any.
+        tb : traceback or None
+            The traceback, if any.
+
+        Returns
+        -------
+        bool
+            False, so exceptions propagate.
+        """
+        self.close()
+        return False
 
     def __init__(
         self,
@@ -135,7 +364,7 @@ class DuckJanitor:
         if connection is None:
             connection = DuckJanitor.get_shared_connection()
             try:
-                temp_name = f"_validate_{id(relation)}"
+                temp_name = _temp_name("_validate")
                 connection.register(temp_name, relation)
                 connection.execute(f"SELECT 1 FROM {temp_name} LIMIT 0")
             except Exception as exc:
@@ -146,7 +375,7 @@ class DuckJanitor:
 
         # Validate that the relation belongs to the provided connection.
         try:
-            temp_name = f"_validate_{id(relation)}"
+            temp_name = _temp_name("_validate")
             connection.register(temp_name, relation)
             connection.execute(f"SELECT 1 FROM {temp_name} LIMIT 0")
         except Exception as exc:
@@ -158,7 +387,9 @@ class DuckJanitor:
         self._connection = connection
 
     @classmethod
-    def from_pandas(cls, df: pd.DataFrame) -> "DuckJanitor":
+    def from_pandas(
+        cls, df: pd.DataFrame, *, connection: Optional[duckdb.DuckDBPyConnection] = None
+    ) -> "DuckJanitor":
         """
         Create a DuckJanitor from a pandas DataFrame.
 
@@ -166,18 +397,27 @@ class DuckJanitor:
         ----------
         df : pd.DataFrame
             The pandas DataFrame.
+        connection : duckdb.DuckDBPyConnection, optional
+            The connection to load the frame into. Defaults to the shared
+            in-memory connection. Pass a session's connection to load data
+            into that session's database.
 
         Returns
         -------
         DuckJanitor
             A DuckJanitor instance.
         """
-        conn = cls.get_shared_connection()
+        conn = connection or cls.get_shared_connection()
         relation = conn.from_df(df)
         return cls(relation, connection=conn)
 
     @classmethod
-    def from_parquet(cls, path: Union[str, Path, list[str]]) -> "DuckJanitor":
+    def from_parquet(
+        cls,
+        path: Union[str, Path, list[str]],
+        *,
+        connection: Optional[duckdb.DuckDBPyConnection] = None,
+    ) -> "DuckJanitor":
         """
         Create a DuckJanitor from Parquet file(s).
 
@@ -185,6 +425,8 @@ class DuckJanitor:
         ----------
         path : str, Path, or list of str/Path
             Path(s) to Parquet file(s). Can be local or remote (s3://, http://).
+        connection : duckdb.DuckDBPyConnection, optional
+            The connection to read into. Defaults to the shared connection.
 
         Returns
         -------
@@ -197,7 +439,7 @@ class DuckJanitor:
         >>> dj = DuckJanitor.from_parquet(['part1.parquet', 'part2.parquet'])
         >>> dj = DuckJanitor.from_parquet('s3://bucket/data.parquet')
         """
-        conn = cls.get_shared_connection()
+        conn = connection or cls.get_shared_connection()
 
         if isinstance(path, list):
             path_list = [str(p) for p in path]
@@ -210,7 +452,13 @@ class DuckJanitor:
         return cls(relation, connection=conn)
 
     @classmethod
-    def from_csv(cls, path: Union[str, Path], **kwargs: Any) -> "DuckJanitor":
+    def from_csv(
+        cls,
+        path: Union[str, Path],
+        *,
+        connection: Optional[duckdb.DuckDBPyConnection] = None,
+        **kwargs: Any,
+    ) -> "DuckJanitor":
         """
         Create a DuckJanitor from a CSV file.
 
@@ -218,6 +466,8 @@ class DuckJanitor:
         ----------
         path : str or Path
             Path to the CSV file.
+        connection : duckdb.DuckDBPyConnection, optional
+            The connection to read into. Defaults to the shared connection.
         **kwargs
             Additional arguments passed to DuckDB's read_csv.
 
@@ -226,7 +476,7 @@ class DuckJanitor:
         DuckJanitor
             A DuckJanitor instance.
         """
-        conn = cls.get_shared_connection()
+        conn = connection or cls.get_shared_connection()
         relation = conn.read_csv(str(path), **kwargs)
         return cls(relation, connection=conn)
 
@@ -235,6 +485,8 @@ class DuckJanitor:
         cls,
         path: Union[str, Path, list[Union[str, Path]]],
         format: str = "auto",  # noqa: A002
+        *,
+        connection: Optional[duckdb.DuckDBPyConnection] = None,
         **kwargs: Any,
     ) -> "DuckJanitor":
         """
@@ -257,6 +509,8 @@ class DuckJanitor:
         format : str, optional
             ``'auto'`` (default), ``'array'``, or ``'newline_delimited'``.
             ``'auto'`` lets DuckDB infer from file content/extension.
+        connection : duckdb.DuckDBPyConnection, optional
+            The connection to read into. Defaults to the shared connection.
         **kwargs
             Extra arguments forwarded to DuckDB's ``read_json_auto``
             (e.g. ``columns``, ``records``, ``maximum_object_size``).
@@ -275,7 +529,7 @@ class DuckJanitor:
         >>> dj = DuckJanitor.from_json(['part1.json', 'part2.json'])
         >>> dj = DuckJanitor.from_json('data.json', format='array')
         """
-        conn = cls.get_shared_connection()
+        conn = connection or cls.get_shared_connection()
 
         if isinstance(path, list):
             path_repr = "[" + ", ".join(repr(str(p)) for p in path) + "]"
@@ -304,6 +558,8 @@ class DuckJanitor:
         path: Union[str, Path],
         sheet_name: Union[str, int, None] = 0,
         header: int = 0,
+        *,
+        connection: Optional[duckdb.DuckDBPyConnection] = None,
         usecols: Optional[Union[str, list[str], list[int]]] = None,
         skiprows: Optional[Union[int, list[int]]] = None,
         nrows: Optional[int] = None,
@@ -330,6 +586,9 @@ class DuckJanitor:
             used here — pass a specific name/index to control).
         header : int, optional
             Row (0-indexed) to use as column names. Default 0.
+        connection : duckdb.DuckDBPyConnection, optional
+            The connection to load the sheet into. Defaults to the shared
+            connection.
         usecols : str, list, or None, optional
             Column selector accepted by pandas.read_excel
             (e.g. ``"A:C"``, ``["Name", "Age"]``, ``[0, 2]``).
@@ -379,7 +638,7 @@ class DuckJanitor:
             # Take the first sheet deterministically.
             first_key = next(iter(df))
             df = df[first_key]
-        return cls.from_pandas(df)
+        return cls.from_pandas(df, connection=connection)
 
     @classmethod
     def from_database(
@@ -387,6 +646,8 @@ class DuckJanitor:
         connection: Any,
         query: str,
         params: Optional[Any] = None,
+        *,
+        target_connection: Optional[duckdb.DuckDBPyConnection] = None,
         **kwargs: Any,
     ) -> "DuckJanitor":
         """Create a DuckJanitor from a query on an external database.
@@ -408,6 +669,9 @@ class DuckJanitor:
             Parameters passed unchanged to the database driver. Use the
             placeholder style required by that driver (for example ``?``
             for pyodbc or ``%s`` for many DB-API drivers).
+        target_connection : duckdb.DuckDBPyConnection, optional
+            The DuckDB connection to load the result into. Defaults to the
+            shared connection.
         **kwargs
             Additional arguments forwarded to ``pandas.read_sql_query``
             (for example ``parse_dates`` or ``dtype``).
@@ -446,7 +710,7 @@ class DuckJanitor:
             df = result
         else:
             df = pd.concat(result, ignore_index=True)
-        return cls.from_pandas(df)
+        return cls.from_pandas(df, connection=target_connection)
 
     @classmethod
     def from_sql(
@@ -503,6 +767,828 @@ class DuckJanitor:
         if n < 0:
             raise ValueError("n must be >= 0")
         return self._relation.limit(n).df()
+
+    # =============================================================
+    # Output suite — write results without going through pandas.
+    # =============================================================
+
+    def to_parquet(
+        self,
+        path: Union[str, Path],
+        *,
+        overwrite: bool = False,
+        compression: Optional[str] = None,
+    ) -> str:
+        """Write the pipeline to a Parquet file via DuckDB ``COPY ... TO``.
+
+        This is the out-of-core exit: the result lands in Parquet without
+        ever being materialised in Python.
+
+        Parameters
+        ----------
+        path : str or Path
+            Destination ``.parquet`` path. Parent directories are created.
+        overwrite : bool, optional
+            Replace an existing file. Default is False.
+        compression : str, optional
+            Compression codec, for example ``'zstd'`` or ``'snappy'``.
+
+        Returns
+        -------
+        str
+            The path that was written.
+
+        Examples
+        --------
+        >>> dj.clean_names().to_parquet('out/clean.parquet', compression='zstd')
+        """
+        from .io_ops import to_parquet as _to_parquet
+
+        return _to_parquet(
+            self._relation,
+            path,
+            overwrite=overwrite,
+            compression=compression,
+            conn=self._connection,
+        )
+
+    def to_csv(
+        self,
+        path: Union[str, Path],
+        *,
+        overwrite: bool = False,
+        header: bool = True,
+        delimiter: str = ",",
+    ) -> str:
+        """Write the pipeline to a CSV file via DuckDB ``COPY ... TO``.
+
+        Parameters
+        ----------
+        path : str or Path
+            Destination ``.csv`` path.
+        overwrite : bool, optional
+            Replace an existing file. Default is False.
+        header : bool, optional
+            Write a header row. Default is True.
+        delimiter : str, optional
+            Field delimiter. Default is ``','``.
+
+        Returns
+        -------
+        str
+            The path that was written.
+        """
+        from .io_ops import to_csv as _to_csv
+
+        return _to_csv(
+            self._relation,
+            path,
+            overwrite=overwrite,
+            header=header,
+            delimiter=delimiter,
+            conn=self._connection,
+        )
+
+    def to_json(
+        self,
+        path: Union[str, Path],
+        *,
+        overwrite: bool = False,
+        newline_delimited: bool = False,
+    ) -> str:
+        """Write the pipeline to a JSON file via DuckDB ``COPY ... TO``.
+
+        Parameters
+        ----------
+        path : str or Path
+            Destination ``.json`` or ``.jsonl`` path.
+        overwrite : bool, optional
+            Replace an existing file. Default is False.
+        newline_delimited : bool, optional
+            Write newline-delimited JSON instead of a JSON array.
+
+        Returns
+        -------
+        str
+            The path that was written.
+        """
+        from .io_ops import to_json as _to_json
+
+        return _to_json(
+            self._relation,
+            path,
+            overwrite=overwrite,
+            newline_delimited=newline_delimited,
+            conn=self._connection,
+        )
+
+    def to_table(
+        self,
+        name: str,
+        *,
+        view: bool = False,
+        replace: bool = True,
+    ) -> str:
+        """Materialise the pipeline as a table or view in the DuckDB catalog.
+
+        Parameters
+        ----------
+        name : str
+            Target name. May be ``'schema.table'``.
+        view : bool, optional
+            Create a lazy view instead of a stored table. Default is False.
+        replace : bool, optional
+            Replace an existing object of the same name. Default is True.
+
+        Returns
+        -------
+        str
+            The catalog name that was created.
+        """
+        from .io_ops import to_table as _to_table
+
+        return _to_table(
+            self._relation,
+            name,
+            view=view,
+            replace=replace,
+            conn=self._connection,
+        )
+
+    def to_view(self, name: str, *, replace: bool = True) -> str:
+        """Materialise the pipeline as a view in the DuckDB catalog.
+
+        Parameters
+        ----------
+        name : str
+            Target view name.
+        replace : bool, optional
+            Replace an existing view of the same name. Default is True.
+
+        Returns
+        -------
+        str
+            The catalog name that was created.
+        """
+        return self.to_table(name, view=True, replace=replace)
+
+    def to_arrow(self):
+        """Return the pipeline as an Arrow table.
+
+        Returns
+        -------
+        pyarrow.Table
+            The result as an Arrow table.
+        """
+        from .io_ops import to_arrow as _to_arrow
+
+        return _to_arrow(self._relation)
+
+    def to_polars(self):
+        """Return the pipeline as a Polars DataFrame.
+
+        Returns
+        -------
+        polars.DataFrame
+            The result as a Polars DataFrame.
+        """
+        from .io_ops import to_polars as _to_polars
+
+        return _to_polars(self._relation)
+
+    # =============================================================
+    # Inspection — cheap metadata without materialising the frame.
+    # =============================================================
+
+    @property
+    def columns(self) -> list[str]:
+        """Column names of the current relation, in order.
+
+        Returns
+        -------
+        list of str
+            The column names.
+        """
+        return list(self._relation.columns)
+
+    @property
+    def dtypes(self) -> dict[str, str]:
+        """Column names mapped to their DuckDB type names.
+
+        Returns
+        -------
+        dict
+            Mapping of column name to DuckDB type string.
+        """
+        return dict(zip(self._relation.columns, [str(t) for t in self._relation.types]))
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        """Row and column count of the current relation.
+
+        Returns
+        -------
+        tuple
+            ``(rows, columns)``.
+        """
+        return tuple(self._relation.shape)
+
+    @property
+    def relation(self) -> duckdb.DuckDBPyRelation:
+        """The underlying DuckDB relation.
+
+        Use this as an escape hatch when you need DuckDB's own API.
+
+        Returns
+        -------
+        duckdb.DuckDBPyRelation
+            The wrapped relation.
+        """
+        return self._relation
+
+    @property
+    def connection(self) -> duckdb.DuckDBPyConnection:
+        """The DuckDB connection that owns this relation.
+
+        Returns
+        -------
+        duckdb.DuckDBPyConnection
+            The owning connection.
+        """
+        return self._connection
+
+    def count(self) -> int:
+        """Return the number of rows in the current relation.
+
+        Returns
+        -------
+        int
+            The row count.
+        """
+        temp_name = _temp_name("_pyduck_count")
+        self._connection.register(temp_name, self._relation)
+        result = self._connection.execute(
+            f"SELECT COUNT(*) FROM {self._quote(temp_name)}"
+        ).fetchone()
+        return int(result[0]) if result else 0
+
+    def glimpse(self, n: int = 5) -> pd.DataFrame:
+        """Return the first *n* rows as a pandas DataFrame.
+
+        This is an alias for :meth:`head` with a name that matches the
+        tidyverse convention.
+
+        Parameters
+        ----------
+        n : int, optional
+            Number of rows. Default is 5.
+
+        Returns
+        -------
+        pd.DataFrame
+            The preview rows.
+        """
+        return self.head(n)
+
+    # =============================================================
+    # Nested / typed data verbs (0.4.0).
+    # =============================================================
+
+    def to_struct(
+        self,
+        columns: Union[str, list[str]],
+        struct_column: Optional[str] = None,
+        *,
+        drop_source: bool = False,
+    ) -> "DuckJanitor":
+        """Pack one or more columns into a DuckDB STRUCT column.
+
+        Parameters
+        ----------
+        columns : str or list of str
+            Columns to pack. The source column names become the struct keys.
+        struct_column : str, optional
+            Name of the resulting STRUCT column. Default is ``'struct'``.
+        drop_source : bool, optional
+            Remove the source columns from the output. Default is False.
+
+        Returns
+        -------
+        DuckJanitor
+            A new relation with the STRUCT column added.
+        """
+        from .nested_ops import to_struct as _to_struct
+
+        relation = _to_struct(
+            self._relation,
+            columns,
+            struct_column,
+            drop_source=drop_source,
+            conn=self._connection,
+        )
+        return DuckJanitor(relation, self._connection)
+
+    def from_struct(
+        self,
+        struct_column: str,
+        fields: Optional[list[str]] = None,
+        *,
+        prefix: Optional[str] = None,
+        drop_source: bool = False,
+    ) -> "DuckJanitor":
+        """Expand a STRUCT column into separate scalar columns.
+
+        Parameters
+        ----------
+        struct_column : str
+            The STRUCT column to expand.
+        fields : list of str, optional
+            Which struct keys to extract. All keys are extracted when omitted.
+        prefix : str, optional
+            Prefix added to the output column names.
+        drop_source : bool, optional
+            Remove the STRUCT column from the output. Default is False.
+
+        Returns
+        -------
+        DuckJanitor
+            A new relation with the struct fields as columns.
+        """
+        from .nested_ops import from_struct as _from_struct
+
+        relation = _from_struct(
+            self._relation,
+            struct_column,
+            fields,
+            prefix=prefix,
+            drop_source=drop_source,
+            conn=self._connection,
+        )
+        return DuckJanitor(relation, self._connection)
+
+    def to_list(
+        self,
+        columns: Union[str, list[str]],
+        list_column: Optional[str] = None,
+        *,
+        drop_source: bool = False,
+    ) -> "DuckJanitor":
+        """Pack one or more columns into a DuckDB LIST column.
+
+        Parameters
+        ----------
+        columns : str or list of str
+            Columns to pack into the LIST.
+        list_column : str, optional
+            Name of the resulting LIST column. Default is ``'list'``.
+        drop_source : bool, optional
+            Remove the source columns from the output. Default is False.
+
+        Returns
+        -------
+        DuckJanitor
+            A new relation with the LIST column added.
+        """
+        from .nested_ops import to_list as _to_list
+
+        relation = _to_list(
+            self._relation,
+            columns,
+            list_column,
+            drop_source=drop_source,
+            conn=self._connection,
+        )
+        return DuckJanitor(relation, self._connection)
+
+    def from_list(
+        self,
+        list_column: str,
+        *,
+        index: bool = False,
+        output_column: Optional[str] = None,
+        drop_source: bool = False,
+    ) -> "DuckJanitor":
+        """Expand a LIST column into one row per element.
+
+        Parameters
+        ----------
+        list_column : str
+            The LIST column to expand.
+        index : bool, optional
+            Also emit a 1-based position column. Default is False.
+        output_column : str, optional
+            Name of the position column. Default is ``'pos'``.
+        drop_source : bool, optional
+            Remove the LIST column from the output. Default is False.
+
+        Returns
+        -------
+        DuckJanitor
+            A new relation with one row per list element.
+        """
+        from .nested_ops import from_list as _from_list
+
+        relation = _from_list(
+            self._relation,
+            list_column,
+            index=index,
+            output_column=output_column,
+            drop_source=drop_source,
+            conn=self._connection,
+        )
+        return DuckJanitor(relation, self._connection)
+
+    def unnest(
+        self,
+        columns: Union[str, list[str]],
+        *,
+        drop_source: bool = False,
+    ) -> "DuckJanitor":
+        """Expand one or more LIST columns into rows using ``UNNEST``.
+
+        Parameters
+        ----------
+        columns : str or list of str
+            The LIST columns to expand. Multiple columns are unnested in
+            parallel, zipping their elements.
+        drop_source : bool, optional
+            Remove the source LIST columns from the output. Default is False.
+
+        Returns
+        -------
+        DuckJanitor
+            A new relation with one row per element.
+        """
+        from .nested_ops import unnest as _unnest
+
+        relation = _unnest(
+            self._relation,
+            columns,
+            drop_source=drop_source,
+            conn=self._connection,
+        )
+        return DuckJanitor(relation, self._connection)
+
+    def list_transform(
+        self,
+        list_column: str,
+        func: str,
+        *,
+        output_column: Optional[str] = None,
+    ) -> "DuckJanitor":
+        """Apply a DuckDB lambda over every element of a LIST column.
+
+        Parameters
+        ----------
+        list_column : str
+            The LIST column to transform.
+        func : str
+            A DuckDB lambda body, for example ``'x -> x * 2'``.
+        output_column : str, optional
+            Name of the resulting column. Defaults to overwriting the source.
+
+        Returns
+        -------
+        DuckJanitor
+            A new relation with the transformed LIST column.
+        """
+        from .nested_ops import list_transform as _list_transform
+
+        relation = _list_transform(
+            self._relation,
+            list_column,
+            func,
+            output_column=output_column,
+            conn=self._connection,
+        )
+        return DuckJanitor(relation, self._connection)
+
+    def list_filter(
+        self,
+        list_column: str,
+        func: str,
+        *,
+        output_column: Optional[str] = None,
+    ) -> "DuckJanitor":
+        """Filter the elements of a LIST column with a DuckDB lambda.
+
+        Parameters
+        ----------
+        list_column : str
+            The LIST column to filter.
+        func : str
+            A DuckDB lambda body, for example ``'x -> x > 2'``.
+        output_column : str, optional
+            Name of the resulting column. Defaults to overwriting the source.
+
+        Returns
+        -------
+        DuckJanitor
+            A new relation with the filtered LIST column.
+        """
+        from .nested_ops import list_filter as _list_filter
+
+        relation = _list_filter(
+            self._relation,
+            list_column,
+            func,
+            output_column=output_column,
+            conn=self._connection,
+        )
+        return DuckJanitor(relation, self._connection)
+
+    def json_extract(
+        self,
+        json_column: str,
+        path: str,
+        *,
+        output_column: Optional[str] = None,
+    ) -> "DuckJanitor":
+        """Extract a value from a JSON column.
+
+        Parameters
+        ----------
+        json_column : str
+            The JSON column to read.
+        path : str
+            A JSON pointer such as ``'$.a.b'`` or a plain key name.
+        output_column : str, optional
+            Name of the resulting column. Defaults to overwriting the source.
+
+        Returns
+        -------
+        DuckJanitor
+            A new relation with the extracted value.
+        """
+        from .nested_ops import json_extract as _json_extract
+
+        relation = _json_extract(
+            self._relation,
+            json_column,
+            path,
+            output_column=output_column,
+            conn=self._connection,
+        )
+        return DuckJanitor(relation, self._connection)
+
+    # =============================================================
+    # Sampling — DuckDB-native, no full sort.
+    # =============================================================
+
+    def sample(
+        self,
+        n: Optional[int] = None,
+        frac: Optional[float] = None,
+        *,
+        seed: Optional[int] = None,
+        method: str = "reservoir",
+    ) -> "DuckJanitor":
+        """Randomly sample the pipeline via DuckDB's ``USING SAMPLE``.
+
+        Parameters
+        ----------
+        n : int, optional
+            Number of rows to sample. Mutually exclusive with *frac*.
+            Only the ``'reservoir'`` method supports a row count.
+        frac : float, optional
+            Fraction of rows to sample, between 0 and 1. Mutually exclusive
+            with *n*.
+        seed : int, optional
+            Non-negative seed for reproducible sampling.
+        method : str, optional
+            Sampling method: ``'reservoir'`` (default), ``'bernoulli'``, or
+            ``'system'``.
+
+        Returns
+        -------
+        DuckJanitor
+            A new relation holding the sample.
+
+        Examples
+        --------
+        >>> dj.sample(n=1000, seed=42).collect()
+        """
+        from .sampling import sample as _sample
+
+        relation = _sample(
+            self._relation,
+            n=n,
+            frac=frac,
+            seed=seed,
+            method=method,
+            conn=self._connection,
+        )
+        return DuckJanitor(relation, self._connection)
+
+    def sample_rows(self, n: int, *, seed: Optional[int] = None) -> "DuckJanitor":
+        """Pick *n* rows in random order without a full sort.
+
+        Parameters
+        ----------
+        n : int
+            Number of rows to pick.
+        seed : int, optional
+            Non-negative seed for a reproducible pick.
+
+        Returns
+        -------
+        DuckJanitor
+            A new relation holding *n* rows.
+        """
+        from .sampling import sample_rows as _sample_rows
+
+        relation = _sample_rows(self._relation, n, seed=seed, conn=self._connection)
+        return DuckJanitor(relation, self._connection)
+
+    def approx_distinct(self, column: str) -> "DuckJanitor":
+        """Approximate the number of distinct values in *column*.
+
+        Parameters
+        ----------
+        column : str
+            Column to inspect.
+
+        Returns
+        -------
+        DuckJanitor
+            A single-row relation with the approximate count.
+        """
+        from .sampling import approx_distinct as _approx_distinct
+
+        relation = _approx_distinct(self._relation, column, conn=self._connection)
+        return DuckJanitor(relation, self._connection)
+
+    def approx_quantile(self, column: str, quantile: float) -> "DuckJanitor":
+        """Approximate a quantile of *column*.
+
+        Parameters
+        ----------
+        column : str
+            Column to inspect.
+        quantile : float
+            Target quantile, between 0 and 1.
+
+        Returns
+        -------
+        DuckJanitor
+            A single-row relation with the approximate quantile.
+        """
+        from .sampling import approx_quantile as _approx_quantile
+
+        relation = _approx_quantile(self._relation, column, quantile, conn=self._connection)
+        return DuckJanitor(relation, self._connection)
+
+    def register_python_function(
+        self,
+        name: str,
+        func: Callable,
+        *,
+        params: Optional[list[str]] = None,
+        return_type: Optional[str] = None,
+    ) -> "DuckJanitor":
+        """Register a Python callable as a DuckDB scalar UDF.
+
+        The function is registered on this pipeline's connection, so it can
+        be used by any later ``sql()`` call or by
+        :meth:`apply_python_function`. This keeps user logic inside DuckDB
+        instead of forcing a pandas round-trip.
+
+        Parameters
+        ----------
+        name : str
+            Name to register the function under.
+        func : callable
+            The Python callable.
+        params : list of str, optional
+            Parameter types, for example ``['VARCHAR']``.
+        return_type : str, optional
+            Return type, for example ``'BIGINT'``. Required when the
+            callable has no return annotation.
+
+        Returns
+        -------
+        DuckJanitor
+            This object, so the call can stay inside a chain.
+        """
+        from .sampling import register_python_function as _register_python_function
+
+        _register_python_function(
+            self._relation,
+            name,
+            func,
+            params=params,
+            return_type=return_type,
+            conn=self._connection,
+        )
+        return self
+
+    def apply_python_function(
+        self,
+        column: str,
+        func: Callable,
+        *,
+        name: Optional[str] = None,
+        params: Optional[list[str]] = None,
+        return_type: Optional[str] = None,
+        output_column: Optional[str] = None,
+    ) -> "DuckJanitor":
+        """Apply a Python callable to a column inside DuckDB.
+
+        Parameters
+        ----------
+        column : str
+            Column to transform.
+        func : callable
+            The Python callable.
+        name : str, optional
+            Name to register the UDF under. Generated when omitted.
+        params : list of str, optional
+            Parameter types for the UDF.
+        return_type : str, optional
+            Return type for the UDF.
+        output_column : str, optional
+            Name of the resulting column. Defaults to ``'<column>_py'``.
+
+        Returns
+        -------
+        DuckJanitor
+            A new relation with the transformed column added.
+        """
+        from .sampling import apply_python_function as _apply_python_function
+
+        relation = _apply_python_function(
+            self._relation,
+            column,
+            func,
+            name=name,
+            params=params,
+            return_type=return_type,
+            conn=self._connection,
+        )
+        return DuckJanitor(relation, self._connection)
+
+    def show(self, n: int = 10, *, max_width: int = 100) -> str:
+        """Return a DuckDB-style text table of the first *n* rows.
+
+        Parameters
+        ----------
+        n : int, optional
+            Number of rows to show. Default is 10.
+        max_width : int, optional
+            Maximum column width in characters. Default is 100.
+
+        Returns
+        -------
+        str
+            The rendered table.
+        """
+        if n < 0:
+            raise ValueError("n must be >= 0")
+        # DuckDB's relation.show() prints to stdout and returns None, so
+        # capture it rather than returning an empty string.
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            self._relation.limit(n).show(max_rows=n, max_width=max_width)
+        return buffer.getvalue().rstrip("\n")
+
+    def _repr_html_(self) -> str:
+        """Rich HTML representation for Jupyter notebooks.
+
+        Returns
+        -------
+        str
+            An HTML fragment with the schema and a preview table.
+        """
+        try:
+            preview = self.head(10)
+            columns = list(preview.columns)
+            header = "".join(f"<th>{_escape_html(str(c))}</th>" for c in columns)
+            rows = []
+            for record in preview.itertuples(index=False):
+                cells = "".join(
+                    f"<td>{_escape_html('' if v is None else str(v))}</td>" for v in record
+                )
+                rows.append(f"<tr>{cells}</tr>")
+            types = self.dtypes
+            type_rows = "".join(
+                f"<tr><td>{_escape_html(str(name))}</td>"
+                f"<td>{_escape_html(str(types.get(name, '')))}</td></tr>"
+                for name in columns
+            )
+            row_count = self.count()
+            return (
+                "<div style='font-family: ui-monospace, SFMono-Regular, Menlo, monospace; "
+                "font-size: 12px;'>"
+                f"<div style='color:#666;margin-bottom:4px;'>DuckJanitor &mdash; "
+                f"{row_count:,} row(s) x {len(columns)} column(s)</div>"
+                f"<table style='border-collapse:collapse;'><thead><tr>{header}</tr></thead>"
+                f"<tbody>{''.join(rows)}</tbody></table>"
+                f"<details><summary style='cursor:pointer;color:#666;'>schema</summary>"
+                f"<table style='border-collapse:collapse;'>{type_rows}</table></details>"
+                "</div>"
+            )
+        except Exception:  # noqa: BLE001 - a repr must never raise
+            return f"<pre>{_escape_html(self.__repr__())}</pre>"
 
     def clean_names(
         self,
@@ -947,14 +2033,21 @@ class DuckJanitor:
         )
         return DuckJanitor(new_relation, self._connection)
 
-    def sql(self, query: str) -> "DuckJanitor":
-        """
-        Execute a custom SQL query on the current relation.
+    def sql(self, query: str, **params: Any) -> "DuckJanitor":
+        """Execute a custom SQL query on the current relation.
+
+        The word ``self`` in the query refers to the current relation. The
+        substitution is aware of string literals, quoted identifiers, and
+        comments, so ``'self'`` and ``"self"`` are left untouched.
 
         Parameters
         ----------
         query : str
-            SQL query. Use 'self' to refer to the current relation.
+            SQL query. Use ``self`` to refer to the current relation.
+        **params
+            Named parameters bound with DuckDB's ``$name`` syntax. Values
+            are passed to the driver rather than interpolated into the SQL,
+            so user data never becomes part of the statement text.
 
         Returns
         -------
@@ -964,11 +2057,15 @@ class DuckJanitor:
         Examples
         --------
         >>> dj.sql("SELECT * FROM self WHERE age > 18")
+        >>> dj.sql("SELECT * FROM self WHERE dept = $dept", dept="Finance")
         """
-        # Register the current relation as a temporary table
-        temp_name = f"_temp_{id(self._relation)}"
+        # Register the current relation as a temporary table.
+        temp_name = _temp_name("_temp")
         self._connection.register(temp_name, self._relation)
-        query = re.sub(r"\bself\b", temp_name, query)
+        query = substitute_self(query, temp_name)
+        if params:
+            arrow_table = self._connection.execute(query, params).to_arrow_table()
+            return DuckJanitor(self._connection.from_arrow(arrow_table), self._connection)
         new_relation = self._connection.query(query)
         return DuckJanitor(new_relation, self._connection)
 
@@ -1054,7 +2151,7 @@ class DuckJanitor:
             raise ValueError(f"graph_algorithm(): unknown edge columns {missing}")
 
         self.load_extension("onager", auto_install=auto_install)
-        temp_name = f"_onager_edges_{id(self._relation)}"
+        temp_name = _temp_name("_onager_edges")
         self._connection.register(temp_name, self._relation)
         source_type = str(self._relation.types[list(self._relation.columns).index(source)]).upper()
         target_type = str(self._relation.types[list(self._relation.columns).index(target)]).upper()
@@ -1076,7 +2173,7 @@ class DuckJanitor:
                 f"CAST({self._quote(target)} AS BIGINT) AS dst"
             )
         else:
-            node_map_name = f"_onager_nodes_{id(self._relation)}"
+            node_map_name = _temp_name("_onager_nodes")
             node_map = self._connection.sql(
                 f"""
                 SELECT node_key, ROW_NUMBER() OVER ()::BIGINT AS node_id
@@ -1092,7 +2189,7 @@ class DuckJanitor:
                 """
             )
             self._connection.register(node_map_name, node_map)
-            encoded_name = f"_onager_encoded_{id(self._relation)}"
+            encoded_name = _temp_name("_onager_encoded")
             encoded_query = (
                 "SELECT src_node.node_id AS src, dst_node.node_id AS dst "
                 + (f", {self._quote(weight)} AS weight " if weight else "")
@@ -1117,7 +2214,7 @@ class DuckJanitor:
         query = f"SELECT * FROM {function}({', '.join(arguments)})"
         result = self._connection.query(query)
         if node_map_name and "node_id" in result.columns:
-            result_name = f"_onager_result_{id(result)}"
+            result_name = _temp_name("_onager_result")
             self._connection.register(result_name, result)
             result = self._connection.sql(
                 f"SELECT nodes.node_key AS node_id, result.* EXCLUDE (node_id) "
@@ -1205,7 +2302,7 @@ class DuckJanitor:
         if source not in self._relation.columns or target not in self._relation.columns:
             raise ValueError("network_evolution(): source and target columns are required")
         algorithm_names = [algorithms] if isinstance(algorithms, str) else list(algorithms)
-        relation_name = f"_network_evolution_{id(self._relation)}"
+        relation_name = _temp_name("_network_evolution")
         self._connection.register(relation_name, self._relation)
         periods = self._connection.sql(
             f"SELECT DISTINCT date_trunc('{frequency}', CAST({self._quote(date_col)} AS TIMESTAMP)) "
@@ -1214,7 +2311,7 @@ class DuckJanitor:
         ).fetchall()
         collected: dict[str, list[str]] = {name: [] for name in algorithm_names}
         for period_index, (period,) in enumerate(periods):
-            period_name = f"_network_period_{id(self._relation)}_{period_index}"
+            period_name = f"{_temp_name('_network_period')}_{period_index}"
             period_relation = self._connection.sql(
                 f"SELECT * FROM {self._quote(relation_name)} "
                 f"WHERE date_trunc('{frequency}', CAST({self._quote(date_col)} AS TIMESTAMP)) "
@@ -1239,7 +2336,7 @@ class DuckJanitor:
             if not queries:
                 continue
             union_query = " UNION ALL ".join(queries)
-            combined_name = f"_network_combined_{id(self._relation)}_{name}"
+            combined_name = f"{_temp_name('_network_combined')}_{name}"
             combined = self._connection.sql(union_query)
             self._connection.register(combined_name, combined)
             columns = list(combined.columns)
@@ -1332,7 +2429,7 @@ class DuckJanitor:
             else:
                 raise ValueError(f"metrics(): invalid specification for {alias!r}")
             select_parts.append(f"{expression} AS {self._quote(alias)}")
-        relation_name = f"_metrics_{id(self._relation)}"
+        relation_name = _temp_name("_metrics")
         self._connection.register(relation_name, self._relation)
         query = f"SELECT {', '.join(select_parts)} FROM {self._quote(relation_name)}"
         if where:
@@ -1341,22 +2438,109 @@ class DuckJanitor:
             query += f" GROUP BY {', '.join(self._quote(column) for column in groups)}"
         return DuckJanitor(self._connection.sql(query), self._connection)
 
-    def profile(self) -> "DuckJanitor":
-        """Return one profiling row per column using DuckDB aggregates."""
-        relation_name = f"_profile_{id(self._relation)}"
+    def profile(self, *, quantiles: Optional[list[float]] = None, top_n: int = 0) -> "DuckJanitor":
+        """Return one profiling row per column using DuckDB aggregates.
+
+        The profile covers null counts and rates, distinct counts and rates,
+        min/max, and — for numeric columns — mean, standard deviation, and
+        the requested quantiles. When *top_n* is greater than zero, a
+        ``top_values`` column holds the most frequent values for the column
+        as a comma-separated list.
+
+        Parameters
+        ----------
+        quantiles : list of float, optional
+            Quantiles to compute for numeric columns, for example
+            ``[0.25, 0.5, 0.75]``. Default is ``[0.5]``.
+        top_n : int, optional
+            Number of most-frequent values to include per column. Default
+            is 0, which omits the column.
+
+        Returns
+        -------
+        DuckJanitor
+            A relation with one row per profiled column.
+
+        Examples
+        --------
+        >>> dj.profile(quantiles=[0.5, 0.95], top_n=3).collect()
+        """
+        quantile_list = [0.5] if quantiles is None else list(quantiles)
+        for quantile in quantile_list:
+            if not 0 <= quantile <= 1:
+                raise ValueError(f"profile(): quantiles must be between 0 and 1. Got {quantile}.")
+        if top_n < 0:
+            raise ValueError("profile(): top_n must be >= 0.")
+
+        relation_name = _temp_name("_profile")
         self._connection.register(relation_name, self._relation)
+        columns = list(self._relation.columns)
+        types = [str(t).upper() for t in self._relation.types]
+        numeric_types = (
+            "TINYINT",
+            "SMALLINT",
+            "INTEGER",
+            "BIGINT",
+            "HUGEINT",
+            "UTINYINT",
+            "USMALLINT",
+            "UINTEGER",
+            "UBIGINT",
+            "UHUGEINT",
+            "FLOAT",
+            "DOUBLE",
+            "DECIMAL",
+            "REAL",
+        )
+        # Every branch of the UNION must expose the same columns, so the
+        # quantile labels are computed once and non-numeric columns emit
+        # NULL for the numeric-only statistics.
+        quantile_labels = [
+            (quantile, f"q{str(quantile).replace('.', '_')}_value") for quantile in quantile_list
+        ]
         queries = []
-        for column in self._relation.columns:
+        for index, column in enumerate(columns):
             quoted = self._quote(column)
+            column_type = types[index]
+            is_numeric = any(marker in column_type for marker in numeric_types)
+
+            numeric_extras = []
+            if is_numeric:
+                numeric_extras.append(f"AVG(TRY_CAST({quoted} AS DOUBLE)) AS mean_value")
+                numeric_extras.append(f"STDDEV_SAMP(TRY_CAST({quoted} AS DOUBLE)) AS stddev_value")
+                for quantile, label in quantile_labels:
+                    numeric_extras.append(
+                        f"QUANTILE_CONT(TRY_CAST({quoted} AS DOUBLE), {quantile}) AS {label}"
+                    )
+            else:
+                numeric_extras.append("NULL AS mean_value")
+                numeric_extras.append("NULL AS stddev_value")
+                for _quantile, label in quantile_labels:
+                    numeric_extras.append(f"NULL AS {label}")
+
+            if top_n > 0:
+                top_values = (
+                    ", (SELECT STRING_AGG(v, ', ' ORDER BY n DESC, v) FROM ("
+                    f"SELECT CAST({quoted} AS VARCHAR) AS v, COUNT(*) AS n "
+                    f"FROM {self._quote(relation_name)} WHERE {quoted} IS NOT NULL "
+                    "GROUP BY 1 ORDER BY n DESC, v LIMIT "
+                    f"{int(top_n)})) AS top_values"
+                )
+            else:
+                top_values = ", NULL AS top_values"
+
             queries.append(
                 "SELECT "
                 f"{self._sql_value(column)} AS column_name, "
-                f"{self._sql_value(str(self._relation.types[list(self._relation.columns).index(column)]))} AS data_type, "
+                f"{self._sql_value(column_type)} AS data_type, "
                 f"COUNT(*) AS row_count, COUNT(*) - COUNT({quoted}) AS null_count, "
                 f"CASE WHEN COUNT(*) = 0 THEN 0.0 ELSE (COUNT(*) - COUNT({quoted})) / CAST(COUNT(*) AS DOUBLE) END AS null_rate, "
                 f"COUNT(DISTINCT {quoted}) AS distinct_count, "
                 f"CASE WHEN COUNT(*) = 0 THEN 0.0 ELSE COUNT(DISTINCT {quoted}) / CAST(COUNT(*) AS DOUBLE) END AS distinct_rate, "
-                f"CAST(MIN({quoted}) AS VARCHAR) AS min_value, CAST(MAX({quoted}) AS VARCHAR) AS max_value "
+                f"CAST(MIN({quoted}) AS VARCHAR) AS min_value, "
+                f"CAST(MAX({quoted}) AS VARCHAR) AS max_value, "
+                f"{', '.join(numeric_extras)}"
+                f"{top_values} "
                 f"FROM {self._quote(relation_name)}"
             )
         return DuckJanitor(self._connection.sql(" UNION ALL ".join(queries)), self._connection)
@@ -1390,7 +2574,7 @@ class DuckJanitor:
                 unknown = [column for column in subset if column not in dimensions]
                 if unknown:
                     raise ValueError(f"metric_cube(): unknown grouping-set dimensions {unknown}")
-        relation_name = f"_metric_cube_{id(self._relation)}"
+        relation_name = _temp_name("_metric_cube")
         self._connection.register(relation_name, self._relation)
         if totals == "rollup":
             group_clause = f"ROLLUP ({', '.join(self._quote(column) for column in dimensions)})"
@@ -1451,7 +2635,7 @@ class DuckJanitor:
             expressions.append(
                 f"CAST(({numerator}) AS DOUBLE) / NULLIF(({denominator}), 0) AS {self._quote(alias)}"
             )
-        relation_name = f"_rate_metrics_{id(self._relation)}"
+        relation_name = _temp_name("_rate_metrics")
         self._connection.register(relation_name, self._relation)
         query = f"SELECT {', '.join(expressions)} FROM {self._quote(relation_name)}"
         if where:
@@ -1473,7 +2657,7 @@ class DuckJanitor:
             raise ValueError("cohort_metrics(): entity and activity_date columns are required")
         if frequency not in {"day", "week", "month", "quarter", "year"}:
             raise ValueError("cohort_metrics(): unsupported frequency")
-        relation_name = f"_cohort_metrics_{id(self._relation)}"
+        relation_name = _temp_name("_cohort_metrics")
         self._connection.register(relation_name, self._relation)
         cohort_expression = (
             self._quote(cohort_date) if cohort_date else f"MIN({self._quote(activity_date)})"
@@ -1509,7 +2693,7 @@ class DuckJanitor:
         """Return row count, latest timestamp, age, and stale status."""
         if timestamp_col not in self._relation.columns:
             raise ValueError(f"freshness(): unknown timestamp column {timestamp_col!r}")
-        relation_name = f"_freshness_{id(self._relation)}"
+        relation_name = _temp_name("_freshness")
         self._connection.register(relation_name, self._relation)
         query = (
             f"SELECT COUNT(*) AS row_count, MAX(CAST({self._quote(timestamp_col)} AS TIMESTAMP)) AS max_timestamp, "
@@ -1537,8 +2721,8 @@ class DuckJanitor:
                 f"reconcile(): missing keys left={missing_left}, right={missing_right}"
             )
         left_name, right_name = (
-            f"_reconcile_left_{id(self._relation)}",
-            f"_reconcile_right_{id(other._relation)}",
+            _temp_name("_reconcile_left"),
+            _temp_name("_reconcile_right"),
         )
         self._connection.register(left_name, self._relation)
         self._connection.register(right_name, other._relation)
@@ -1746,8 +2930,8 @@ class DuckJanitor:
         return DuckJanitor(self._connection.query(query), self._connection)
 
     def _register_diff_sources(self, other: "DuckJanitor") -> tuple[str, str]:
-        left_name = f"_duck_diff_left_{id(self._relation)}"
-        right_name = f"_duck_diff_right_{id(other._relation)}"
+        left_name = _temp_name("_duck_diff_left")
+        right_name = _temp_name("_duck_diff_right")
         self._connection.register(left_name, self._relation)
         try:
             self._connection.register(right_name, other._relation)
@@ -1781,7 +2965,7 @@ class DuckJanitor:
         if date_col is not None and date_col not in columns:
             raise ValueError(f"validate_keys(): unknown date column {date_col!r}")
 
-        relation_name = f"_validate_keys_{id(self._relation)}"
+        relation_name = _temp_name("_validate_keys")
         self._connection.register(relation_name, self._relation)
         quoted_keys = ", ".join(self._quote(column) for column in key_list)
         if not allow_null:
@@ -1845,7 +3029,7 @@ class DuckJanitor:
         missing = [column for column in key_list + order_list if column not in columns]
         if not key_list or missing:
             raise ValueError(f"deduplicate(): unknown or missing columns {missing or key_list}")
-        relation_name = f"_deduplicate_{id(self._relation)}"
+        relation_name = _temp_name("_deduplicate")
         self._connection.register(relation_name, self._relation)
         partition_sql = ", ".join(self._quote(column) for column in key_list)
         if order_list:
@@ -1854,12 +3038,12 @@ class DuckJanitor:
         else:
             order_sql = "row_number() OVER ()"
         selected = ", ".join(self._quote(column) for column in self._relation.columns)
+        # QUALIFY filters on window functions directly, which avoids
+        # wrapping the query in an extra CTE and lets DuckDB push the
+        # partition/filter into a single scan.
         query = (
-            "WITH ranked AS ("
-            f"SELECT {selected}, ROW_NUMBER() OVER (PARTITION BY {partition_sql} "
-            f"ORDER BY {order_sql}) AS __pyduck_dedup_rank "
-            f"FROM {self._quote(relation_name)}) "
-            "SELECT " + selected + " FROM ranked WHERE __pyduck_dedup_rank = 1"
+            f"SELECT {selected} FROM {self._quote(relation_name)} "
+            f"QUALIFY ROW_NUMBER() OVER (PARTITION BY {partition_sql} ORDER BY {order_sql}) = 1"
         )
         return DuckJanitor(self._connection.query(query), self._connection)
 
@@ -1884,7 +3068,7 @@ class DuckJanitor:
             raise ValueError("filter_noise(): min_records must be at least 1")
         if (exclude_ids or exclude_regex or min_records is not None) and id_col is None:
             raise ValueError("filter_noise(): id_col is required for ID-based filters")
-        relation_name = f"_filter_noise_{id(self._relation)}"
+        relation_name = _temp_name("_filter_noise")
         self._connection.register(relation_name, self._relation)
         predicates = [where] if where else []
         if exclude_ids:
@@ -1930,7 +3114,7 @@ class DuckJanitor:
         for name in (source_name, target_name):
             if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
                 raise ValueError(f"hierarchy_edges(): invalid output column {name!r}")
-        relation_name = f"_hierarchy_edges_{id(self._relation)}"
+        relation_name = _temp_name("_hierarchy_edges")
         self._connection.register(relation_name, self._relation)
         predicates = []
         if drop_null_parent:
@@ -1969,7 +3153,7 @@ class DuckJanitor:
             raise ValueError("time_slice(): start or end is required")
         if inclusive not in {"both", "left", "right", "neither"}:
             raise ValueError("time_slice(): inclusive must be both, left, right, or neither")
-        relation_name = f"_time_slice_{id(self._relation)}"
+        relation_name = _temp_name("_time_slice")
         self._connection.register(relation_name, self._relation)
         predicates = []
         if start is not None:
@@ -2011,7 +3195,7 @@ class DuckJanitor:
                 interval_pattern, value.strip(), re.I
             ):
                 raise ValueError(f"event_window(): {label} must look like '30 days' or '2 hours'")
-        relation_name = f"_event_window_{id(self._relation)}"
+        relation_name = _temp_name("_event_window")
         self._connection.register(relation_name, self._relation)
         selected = ", ".join(self._quote(column) for column in self._relation.columns)
         event_value = f"CAST({self._sql_value(event_date)} AS TIMESTAMP)"
@@ -2050,7 +3234,7 @@ class DuckJanitor:
         ]
         if not key_list or not order_list or missing:
             raise ValueError(f"change_detection(): unknown or missing columns {missing}")
-        relation_name = f"_change_detection_{id(self._relation)}"
+        relation_name = _temp_name("_change_detection")
         self._connection.register(relation_name, self._relation)
         partition_sql = ", ".join(self._quote(column) for column in key_list)
         order_sql = ", ".join(self._quote(column) for column in order_list)
@@ -2146,7 +3330,7 @@ class DuckJanitor:
 
         shared_partition = normalize_columns(partition_by, "partition_by")
         shared_order = normalize_columns(order_by, "order_by")
-        temp_name = f"_window_{id(self._relation)}"
+        temp_name = _temp_name("_window")
         self._connection.register(temp_name, self._relation)
 
         output_names = set(self._relation.columns)
@@ -2265,7 +3449,7 @@ class DuckJanitor:
         else:
             column_sql = ""
 
-        temp_name = f"_recursive_{id(self._relation)}"
+        temp_name = _temp_name("_recursive")
         self._connection.register(temp_name, self._relation)
         anchor_sql = re.sub(r"\bself\b", self._quote(temp_name), anchor)
         recursive_sql = re.sub(r"\bself\b", self._quote(temp_name), recursive)
@@ -2372,14 +3556,21 @@ class DuckJanitor:
             ``return_diagnostics`` is True (standalone assignment, not mid-chain).
         """
         from .bins_opt import optimize_bins_to_target as _obt
+
         res = _obt(
-            self._relation, y,
-            columns=columns, method=method, cv=cv, task=task,
-            cast_to_text=cast_to_text, suffix=suffix,
+            self._relation,
+            y,
+            columns=columns,
+            method=method,
+            cv=cv,
+            task=task,
+            cast_to_text=cast_to_text,
+            suffix=suffix,
             random_state=random_state,
             return_diagnostics=return_diagnostics,
             optbinning_kwargs=optbinning_kwargs,
-            holdout=holdout, stratify=stratify,
+            holdout=holdout,
+            stratify=stratify,
             sample_n=sample_n,
             conn=self._connection,
         )
@@ -2387,7 +3578,6 @@ class DuckJanitor:
             rel, diag = res  # type: ignore[misc]
             return DuckJanitor(rel, self._connection), diag
         return DuckJanitor(res, self._connection)
-
 
     def change_type(self, column: str, dtype: str) -> "DuckJanitor":
         """Change the data type of a column.
@@ -2895,8 +4085,8 @@ class DuckJanitor:
             if column not in right_columns:
                 raise ValueError(f"asof_join(): by column {column!r} not in other columns")
 
-        left_name = f"_asof_left_{id(self._relation)}"
-        right_name = f"_asof_right_{id(other._relation)}"
+        left_name = _temp_name("_asof_left")
+        right_name = _temp_name("_asof_right")
         self._connection.register(left_name, self._relation)
         try:
             self._connection.register(right_name, other._relation)
@@ -2912,31 +4102,44 @@ class DuckJanitor:
             marker in left_type or marker in right_type for marker in temporal_types
         )
         left_cte = f"SELECT *, row_number() OVER () AS {self._quote(left_id)} FROM {self._quote(left_name)}"
-        right_cte = f"SELECT *, row_number() OVER () AS {self._quote(right_id)} FROM {self._quote(right_name)}"
         equality = " AND ".join(
             f"l.{self._quote(column)} = r.{self._quote(column)}" for column in by_columns
         )
         if equality:
             equality += " AND "
 
-        if direction == "backward":
-            temporal_condition = f"l.{self._quote(left_on)} >= r.{self._quote(right_on)}"
-            order = f"r.{self._quote(right_on)} DESC, r.{self._quote(right_id)} DESC"
-        elif direction == "forward":
-            temporal_condition = f"l.{self._quote(left_on)} <= r.{self._quote(right_on)}"
-            order = f"r.{self._quote(right_on)} ASC, r.{self._quote(right_id)} ASC"
-        else:
-            temporal_condition = "TRUE"
-            if temporal_distance:
-                distance_order = (
-                    f"abs(epoch(l.{self._quote(left_on)}) - epoch(r.{self._quote(right_on)}))"
-                )
-            else:
-                distance_order = f"abs(l.{self._quote(left_on)} - r.{self._quote(right_on)})"
-            order = (
-                f"{distance_order} ASC, r.{self._quote(right_on)} ASC, "
-                f"r.{self._quote(right_id)} ASC"
+        # DuckDB's native ASOF JOIN only supports a single inequality
+        # (>= or <=) and no ORDER BY, so 'nearest' cannot be expressed
+        # natively and keeps the ranking implementation below.
+        if direction != "nearest":
+            return self._asof_join_native(
+                left_name=left_name,
+                left_on=left_on,
+                right_name=right_name,
+                right_on=right_on,
+                by_columns=by_columns,
+                direction=direction,
+                tolerance=tolerance,
+                temporal_distance=temporal_distance,
+                suffixes=suffixes,
+                keep_right_keys=keep_right_keys,
+                left_columns=left_columns,
+                right_columns=right_columns,
+                left_id=left_id,
+                right_id=right_id,
             )
+
+        right_cte = f"SELECT *, row_number() OVER () AS {self._quote(right_id)} FROM {self._quote(right_name)}"
+        temporal_condition = "TRUE"
+        if temporal_distance:
+            distance_order = (
+                f"abs(epoch(l.{self._quote(left_on)}) - epoch(r.{self._quote(right_on)}))"
+            )
+        else:
+            distance_order = f"abs(l.{self._quote(left_on)} - r.{self._quote(right_on)})"
+        order = (
+            f"{distance_order} ASC, r.{self._quote(right_on)} ASC, r.{self._quote(right_id)} ASC"
+        )
 
         if direction != "nearest":
             distance = f"(l.{self._quote(left_on)} - r.{self._quote(right_on)})"
@@ -2991,6 +4194,178 @@ class DuckJanitor:
             SELECT {", ".join(self._quote(name) for name in output_names)}
             FROM ranked
             WHERE __dj_asof_rank = 1
+            ORDER BY {self._quote(left_id)}
+        """
+        new_relation = self._connection.query(query)
+        return DuckJanitor(new_relation, self._connection)
+
+    def _asof_join_native(
+        self,
+        *,
+        left_name: str,
+        left_on: str,
+        right_name: str,
+        right_on: str,
+        by_columns: list[str],
+        direction: str,
+        tolerance: Optional[Any],
+        temporal_distance: bool,
+        suffixes: tuple[str, str],
+        keep_right_keys: bool,
+        left_columns: list[str],
+        right_columns: list[str],
+        left_id: str,
+        right_id: str,
+    ) -> "DuckJanitor":
+        """Execute a backward/forward as-of join using DuckDB's native syntax.
+
+        DuckDB's ``ASOF JOIN`` is a single-indexed lookup rather than the
+        rank-and-filter emulation, so it is substantially faster on large
+        relations. Because native ASOF has no ``ORDER BY`` tie-break, the
+        right side is de-duplicated first so that the surviving row per
+        key/time pair is the same one the emulation would have chosen.
+
+        Parameters
+        ----------
+        left_name : str
+            Registered name of the left relation.
+        left_on : str
+            Temporal column on the left side.
+        right_name : str
+            Registered name of the right relation.
+        right_on : str
+            Temporal column on the right side.
+        by_columns : list of str
+            Equality key columns.
+        direction : str
+            ``'backward'`` or ``'forward'``.
+        tolerance : object, optional
+            Maximum allowed distance.
+        temporal_distance : bool
+            Whether the keys are temporal types.
+        suffixes : tuple of str
+            Output column suffixes.
+        keep_right_keys : bool
+            Whether to keep duplicated key columns from the right side.
+        left_columns : list of str
+            Left-side column names.
+        right_columns : list of str
+            Right-side column names.
+        left_id : str
+            Name of the left row-id column.
+        right_id : str
+            Name of the right row-id column.
+
+        Returns
+        -------
+        DuckJanitor
+            The join result.
+        """
+        equality = " AND ".join(
+            f"l.{self._quote(column)} = r.{self._quote(column)}" for column in by_columns
+        )
+        if equality:
+            equality += " AND "
+
+        # The temporal column is projected under a fixed alias so the join
+        # predicate does not have to care whether the two sides name it
+        # differently.
+        temporal_left = "__dj_temporal_left"
+        left_cte = (
+            f"SELECT *, {self._quote(left_on)} AS {self._quote(temporal_left)}, "
+            f"row_number() OVER () AS {self._quote(left_id)} "
+            f"FROM {self._quote(left_name)}"
+        )
+
+        if direction == "backward":
+            temporal_condition = f"l.{self._quote(temporal_left)} >= r.{self._quote(right_on)}"
+        else:
+            temporal_condition = f"l.{self._quote(temporal_left)} <= r.{self._quote(right_on)}"
+
+        # De-duplicate the right side keeping the same row the emulation
+        # picked: the last one in right-row-id order for a backward join,
+        # the first one for a forward join.
+        right_order = (
+            f"{self._quote(right_on)} DESC, {self._quote(right_id)} DESC"
+            if direction == "backward"
+            else f"{self._quote(right_on)} ASC, {self._quote(right_id)} ASC"
+        )
+        right_keys = set(by_columns + [right_on])
+        dedupe_partition = ", ".join(self._quote(column) for column in sorted(right_keys))
+        right_deduped = f"""
+            SELECT * EXCLUDE ({self._quote(right_id)})
+            FROM (
+                SELECT *,
+                       row_number() OVER (
+                           PARTITION BY {dedupe_partition} ORDER BY {right_order}
+                       ) AS __dj_asof_dedupe_rank
+                FROM (
+                    SELECT *, row_number() OVER () AS {self._quote(right_id)}
+                    FROM {self._quote(right_name)}
+                )
+            )
+            WHERE __dj_asof_dedupe_rank = 1
+        """
+
+        # Tolerance is applied by nulling the right-hand columns when the
+        # matched row is further away than the tolerance allows. The left
+        # row is always preserved, which matches the rank-and-filter
+        # behaviour this replaces: a row whose best match is out of
+        # tolerance keeps its left values and receives NULLs on the right.
+        right_case = ""
+        if tolerance is not None:
+            if isinstance(tolerance, str):
+                # A string tolerance is a DuckDB interval; it is converted
+                # to seconds so it can be compared with an epoch gap.
+                tolerance_value = f"epoch(CAST({self._sql_value(tolerance)} AS INTERVAL))"
+            else:
+                tolerance_value = self._sql_value(tolerance)
+            if temporal_distance:
+                # DuckDB subtracts two temporal values into an INTERVAL.
+                # abs() has no INTERVAL overload, so the gap is computed in
+                # epoch seconds and compared against a numeric tolerance.
+                gap = (
+                    f"abs(epoch(l.{self._quote(temporal_left)}) - epoch(r.{self._quote(right_on)}))"
+                )
+            else:
+                gap = f"abs(l.{self._quote(temporal_left)} - r.{self._quote(right_on)})"
+            right_case = f"CASE WHEN {gap} <= {tolerance_value} THEN"
+
+        left_output = []
+        output_names = []
+        for column in left_columns:
+            name = column + suffixes[0] if column in right_columns and suffixes[0] else column
+            if name in output_names:
+                raise ValueError(f"asof_join(): duplicate output column {name!r}")
+            output_names.append(name)
+            left_output.append(f"l.{self._quote(column)} AS {self._quote(name)}")
+
+        right_keys = set(by_columns + [right_on])
+        right_output = []
+        for column in right_columns:
+            if column in right_keys and not keep_right_keys:
+                continue
+            name = column + suffixes[1] if column in left_columns else column
+            if name in output_names:
+                raise ValueError(f"asof_join(): duplicate output column {name!r}")
+            output_names.append(name)
+            expression = f"r.{self._quote(column)}"
+            if right_case:
+                expression = f"{right_case} {expression} END"
+            right_output.append(f"{expression} AS {self._quote(name)}")
+
+        projection = ", ".join(left_output + right_output)
+        query = f"""
+            WITH l AS ({left_cte}),
+            r AS ({right_deduped}),
+            joined AS (
+                SELECT {projection}, l.{self._quote(left_id)} AS {self._quote(left_id)}
+                FROM l
+                ASOF LEFT JOIN r
+                    ON {equality}{temporal_condition}
+            )
+            SELECT {", ".join(self._quote(name) for name in output_names)}
+            FROM joined
             ORDER BY {self._quote(left_id)}
         """
         new_relation = self._connection.query(query)
@@ -3404,19 +4779,47 @@ class DuckJanitor:
         new_relation = _pivot_longer(self._relation, cols, names_to, values_to, self._connection)
         return DuckJanitor(new_relation, self._connection)
 
-    def explain(self) -> str:
-        """
-        Show the query plan for the current pipeline.
+    def explain(self, analyze: bool = False, *, format: str = "text") -> str:
+        """Show the query plan for the current pipeline.
+
+        Parameters
+        ----------
+        analyze : bool, optional
+            When True, run ``EXPLAIN ANALYZE`` so the plan includes actual
+            execution statistics. Default is False.
+        format : str, optional
+            ``'text'`` (default) returns the plan as plain text.
+            ``'json'`` returns DuckDB's JSON profiling output.
 
         Returns
         -------
         str
             The query plan.
+
+        Examples
+        --------
+        >>> print(dj.clean_names().explain())
+        ┌───────────────────────────┐
+        │ physical_plan             │
+        ├───────────────────────────┤
+        │ ...                       │
+        └───────────────────────────┘
         """
-        temp_name = f"_temp_explain_{id(self._relation)}"
+        if format not in {"text", "json"}:
+            raise ValueError(f"explain(): format must be 'text' or 'json'. Got {format!r}.")
+        temp_name = _temp_name("_temp_explain")
         self._connection.register(temp_name, self._relation)
-        query = f"EXPLAIN SELECT * FROM {temp_name}"
-        return str(self._connection.execute(query).fetchall())
+        query = f"EXPLAIN {'ANALYZE ' if analyze else ''}SELECT * FROM {temp_name}"
+        if format == "json":
+            rows = self._connection.execute(query).fetchall()
+            return rows[0][1] if rows else ""
+        rows = self._connection.execute(query).fetchall()
+        if not rows:
+            return ""
+        plan = rows[0][1]
+        # DuckDB returns the plan as a plain multi-line string; strip the
+        # leading/trailing blank lines so the caller gets a clean block.
+        return plan.strip("\n") if isinstance(plan, str) else str(plan)
 
     # ---------------------------------------------------------------
     # pyjanitor parity aliases (R/pyjanitor function name alignment).
@@ -3549,7 +4952,7 @@ class DuckJanitor:
                 f"convert_unix_date(): unit must be one of {sorted(multipliers)}; got {unit!r}."
             )
         multiplier = multipliers[unit]
-        temp_name = f"_unix_{id(self._relation)}"
+        temp_name = _temp_name("_unix")
         self._connection.register(temp_name, self._relation)
         # Use TO_TIMESTAMP which accepts DOUBLE seconds directly.
         query = (
@@ -3579,7 +4982,7 @@ class DuckJanitor:
             Self for method chaining, with the new TIMESTAMP column added.
         """
         out = target_column or f"{column}_datetime"
-        temp_name = f"_excel_date_{id(self._relation)}"
+        temp_name = _temp_name("_excel_date")
         self._connection.register(temp_name, self._relation)
         # Use TO_TIMESTAMP which accepts seconds-from-epoch DOUBLE.
         query = (
@@ -3611,7 +5014,7 @@ class DuckJanitor:
             Self for method chaining, with the new TIMESTAMP column added.
         """
         out = target_column or f"{column}_datetime"
-        temp_name = f"_matlab_date_{id(self._relation)}"
+        temp_name = _temp_name("_matlab_date")
         self._connection.register(temp_name, self._relation)
         query = (
             f"SELECT *, TO_TIMESTAMP(CAST({column} AS DOUBLE) * 86400.0 - 719529 * 86400.0) AS "
@@ -3800,7 +5203,7 @@ class DuckJanitor:
             insert_at += 1
         new_order.insert(insert_at, source)
         cols = ", ".join(self._quote(c) for c in new_order)
-        temp_name = f"_move_{id(self._relation)}"
+        temp_name = _temp_name("_move")
         self._connection.register(temp_name, self._relation)
         query = f"SELECT {cols} FROM {temp_name}"
         new_relation = self._connection.query(query)
@@ -3829,7 +5232,7 @@ class DuckJanitor:
         if missing:
             raise ValueError(f"reorder_columns(): unknown columns {missing}")
         cols = ", ".join(self._quote(c) for c in new_order)
-        temp_name = f"_reorder_{id(self._relation)}"
+        temp_name = _temp_name("_reorder")
         self._connection.register(temp_name, self._relation)
         query = f"SELECT {cols} FROM {temp_name}"
         new_relation = self._connection.query(query)
@@ -3889,7 +5292,7 @@ class DuckJanitor:
             seed_clause = f"setseed({normalized})"
         else:
             seed_clause = None
-        temp_name = f"_shuffle_{id(self._relation)}"
+        temp_name = _temp_name("_shuffle")
         self._connection.register(temp_name, self._relation)
         if seed_clause is not None:
             self._connection.execute(f"SELECT {seed_clause}")
@@ -3910,7 +5313,7 @@ class DuckJanitor:
         list
             Distinct values of ``column``, sorted ascending.
         """
-        temp_name = f"_toset_{id(self._relation)}"
+        temp_name = _temp_name("_toset")
         self._connection.register(temp_name, self._relation)
         rows = self._connection.execute(
             f'SELECT DISTINCT "{column}" FROM {temp_name} ORDER BY "{column}"'
@@ -3933,7 +5336,7 @@ class DuckJanitor:
         """
         if n < 0:
             raise ValueError(f"take_first(): n must be >= 0; got {n}")
-        temp_name = f"_take_first_{id(self._relation)}"
+        temp_name = _temp_name("_take_first")
         self._connection.register(temp_name, self._relation)
         # LIMIT on an inner subquery to avoid WHERE-on-window-function binder error.
         query = f"SELECT * FROM (SELECT * FROM {temp_name}) LIMIT {n}"
@@ -3962,7 +5365,7 @@ class DuckJanitor:
             Self for method chaining, with the new seconds column added.
         """
         out = target_column or f"{column}_seconds"
-        temp_name = f"_excel_time_{id(self._relation)}"
+        temp_name = _temp_name("_excel_time")
         self._connection.register(temp_name, self._relation)
         query = f"SELECT *, CAST({column} * 86400.0 AS DOUBLE) AS {out} FROM {temp_name}"
         new_relation = self._connection.query(query)
@@ -3987,7 +5390,7 @@ class DuckJanitor:
             Self for method chaining, with the new TIMESTAMP column added.
         """
         out = target_column or f"{column}_datetime"
-        temp_name = f"_sasdate_{id(self._relation)}"
+        temp_name = _temp_name("_sasdate")
         self._connection.register(temp_name, self._relation)
         query = (
             f"SELECT *, TO_TIMESTAMP(CAST({column} AS DOUBLE) * 86400.0 - 315619200.0) AS {out} "
@@ -4014,7 +5417,7 @@ class DuckJanitor:
         """
         if denominator == 0:
             raise ValueError("round_to_fraction(): denominator must be non-zero")
-        temp_name = f"_rfrac_{id(self._relation)}"
+        temp_name = _temp_name("_rfrac")
         self._connection.register(temp_name, self._relation)
         query = (
             f"SELECT *, ROUND(CAST({column} AS DOUBLE) * {denominator}) / "
@@ -4044,7 +5447,7 @@ class DuckJanitor:
         """
         if by not in {"all", "column"}:
             raise ValueError(f"scale_mad(): 'by' must be 'all' or 'column'; got {by!r}")
-        temp_name = f"_mad_{id(self._relation)}"
+        temp_name = _temp_name("_mad")
         self._connection.register(temp_name, self._relation)
         query = (
             f"SELECT *, ({column} - (SELECT MEDIAN({column}) FROM {temp_name})) / "
@@ -4072,8 +5475,8 @@ class DuckJanitor:
             raise TypeError(
                 f"cartesian_product(): other must be a DuckJanitor; got {type(other).__name__}"
             )
-        left_name = f"_cp_left_{id(self._relation)}"
-        right_name = f"_cp_right_{id(other._relation)}"
+        left_name = _temp_name("_cp_left")
+        right_name = _temp_name("_cp_right")
         self._connection.register(left_name, self._relation)
         other._connection.register(right_name, other._relation)
         query = f"SELECT * FROM {left_name} CROSS JOIN {right_name}"
@@ -4146,7 +5549,7 @@ class DuckJanitor:
             if strict_description:
                 raise ValueError("describe_class(): relation has no columns to describe")
             return pd.DataFrame(columns=["column_name", "column_type"])
-        temp_name = f"_describe_{id(self._relation)}"
+        temp_name = _temp_name("_describe")
         self._connection.register(temp_name, self._relation)
         rows = self._connection.execute(f"DESCRIBE SELECT * FROM {temp_name}").fetchall()
         self._connection.unregister(temp_name)
@@ -4182,7 +5585,7 @@ class DuckJanitor:
         """
         if row_number < 0:
             raise ValueError(f"row_to_names(): row_number must be >= 0; got {row_number}")
-        temp_name = f"_row2n_{id(self._relation)}"
+        temp_name = _temp_name("_row2n")
         self._connection.register(temp_name, self._relation)
         # Pull the row values to use as column names.
         n_cols = len(self._relation.columns)
@@ -4220,7 +5623,7 @@ class DuckJanitor:
         DuckJanitor
             Self for method chaining, with an extra ``_rle_id`` column.
         """
-        temp_name = f"_rle_{id(self._relation)}"
+        temp_name = _temp_name("_rle")
         self._connection.register(temp_name, self._relation)
         cols = ", ".join(f'CAST("{c}" AS VARCHAR)' for c in self._relation.columns)
         query = (
@@ -4255,7 +5658,7 @@ class DuckJanitor:
         cur_cols = list(self._relation.columns)
         if columns is None:
             # Inspect the DuckDB types and use VARCHAR columns as candidates.
-            desc_table = f"__dj_factorize_t_{id(self._relation)}"
+            desc_table = _temp_name("__dj_factorize_t")
             self._connection.register(desc_table, self._relation)
             try:
                 rows = self._connection.execute(
@@ -4270,7 +5673,7 @@ class DuckJanitor:
             if missing:
                 raise ValueError(f"factorize_columns(): unknown columns {missing}")
 
-        temp_name = f"_factorize_{id(self._relation)}"
+        temp_name = _temp_name("_factorize")
         self._connection.register(temp_name, self._relation)
         new_selects = [f'"{c}" AS "{c}"' for c in cur_cols]
         for col in columns:
@@ -4296,7 +5699,7 @@ class DuckJanitor:
         """
         import re as _re
 
-        temp_name = f"_natsort_{id(self._relation)}"
+        temp_name = _temp_name("_natsort")
         self._connection.register(temp_name, self._relation)
         query = f"SELECT * FROM {temp_name}"
         material = self._connection.query(query).df()
@@ -4334,7 +5737,7 @@ class DuckJanitor:
             raise ValueError(
                 f"sort_column_value_order(): column {column!r} not in {list(self._relation.columns)}"
             )
-        temp_name = f"_sortorder_{id(self._relation)}"
+        temp_name = _temp_name("_sortorder")
         self._connection.register(temp_name, self._relation)
         # Validate that every value in `order` exists in the column.
         cur_values = {
@@ -4411,7 +5814,7 @@ class DuckJanitor:
         missing = [c for c in columns if c not in cur_cols]
         if missing:
             raise ValueError(f"update_where(): unknown columns {missing}")
-        temp_name = f"_updwhere_{id(self._relation)}"
+        temp_name = _temp_name("_updwhere")
         self._connection.register(temp_name, self._relation)
         # Build CASE WHEN update expressions per column.
         case_clauses = []
@@ -4468,7 +5871,6 @@ class DuckJanitor:
         # object dtype). Callers should check is_string_dtype.
         return DuckJanitor(new_relation, self._connection)
 
-
     # =============================================================
     # pyjanitor parity batch 3 — heavyweight helpers
     # =============================================================
@@ -4495,7 +5897,7 @@ class DuckJanitor:
         for c in columns:
             if c not in self._relation.columns:
                 raise ValueError(f"expand(): column {c!r} not in {list(self._relation.columns)}")
-        temp_name = f"_expand_{id(self._relation)}"
+        temp_name = _temp_name("_expand")
         self._connection.register(temp_name, self._relation)
         # Use DuckDB GROUP BY ALL to preserve distinct combinations.
         query = f"SELECT DISTINCT {', '.join(self._quote(c) for c in columns)} FROM {temp_name}"
@@ -4581,7 +5983,7 @@ class DuckJanitor:
             raise ValueError("change_index_dtype(): relation has no columns")
         src = cur_cols[0]
         out = target_name or f"{src}_idx_typed"
-        temp_name = f"_idx_dtype_{id(self._relation)}"
+        temp_name = _temp_name("_idx_dtype")
         self._connection.register(temp_name, self._relation)
         query = f'SELECT *, CAST("{src}" AS {dtype}) AS "{out}" FROM {temp_name}'
         new_relation = self._connection.query(query)
@@ -4609,7 +6011,7 @@ class DuckJanitor:
         cur_cols = list(self._relation.columns)
         if column and column not in cur_cols:
             raise ValueError(f"collapse_levels(): unknown column {column!r}")
-        temp_name = f"_collapse_{id(self._relation)}"
+        temp_name = _temp_name("_collapse")
         self._connection.register(temp_name, self._relation)
         if column:
             # No-op: a single column is already flat; return as-is.
@@ -4652,7 +6054,7 @@ class DuckJanitor:
         """
         if column not in self._relation.columns:
             raise ValueError(f"explode_index(): unknown column {column!r}")
-        temp_name = f"_explode_{id(self._relation)}"
+        temp_name = _temp_name("_explode")
         self._connection.register(temp_name, self._relation)
         cur_cols = list(self._relation.columns)
         out_cols = names or [f"{column}_parsed"]
@@ -4693,7 +6095,7 @@ class DuckJanitor:
             missing = [c for c in group_by if c not in cur_cols]
             if missing:
                 raise ValueError(f"summarise(): unknown group_by columns {missing}")
-        temp_name = f"_summarise_{id(self._relation)}"
+        temp_name = _temp_name("_summarise")
         self._connection.register(temp_name, self._relation)
         select_parts = []
         if group_by:
@@ -4766,7 +6168,7 @@ class DuckJanitor:
             select_parts.append(
                 f'UNNEST({", ".join(self._quote(v) for v in value_cols)}) AS "{values_to}"'
             )
-        temp_name = f"_plspec_{id(self._relation)}"
+        temp_name = _temp_name("_plspec")
         self._connection.register(temp_name, self._relation)
         # Without UNNEST it's awkward to pivot properly here; emulate with cross-join.
         # Practical implementation: emit one row per (id × values) using unnest of an array.
@@ -4807,7 +6209,7 @@ class DuckJanitor:
             raise ValueError(f"pivot_wider_spec(): unknown names_from {names_from!r}")
         if values_from not in self._relation.columns:
             raise ValueError(f"pivot_wider_spec(): unknown values_from {values_from!r}")
-        temp_name = f"_pwspec_{id(self._relation)}"
+        temp_name = _temp_name("_pwspec")
         self._connection.register(temp_name, self._relation)
         # DuckDB's PIVOT requires a literal list of values. Collect them first.
         distinct_values = [
@@ -4863,8 +6265,8 @@ class DuckJanitor:
                 "join_agg(): equality joins are not supported; use a non-equality op "
                 "or use conditional_join() for equality."
             )
-        left_name = f"_jagg_left_{id(self._relation)}"
-        right_name = f"_jagg_right_{id(other._relation)}"
+        left_name = _temp_name("_jagg_left")
+        right_name = _temp_name("_jagg_right")
         self._connection.register(left_name, self._relation)
         other._connection.register(right_name, other._relation)
         agg_expressions = ", ".join(
@@ -4912,8 +6314,8 @@ class DuckJanitor:
                 raise TypeError(
                     "get_join_indices(): conditions must be a (left, right, op) tuple or list"
                 ) from err
-        left_name = f"_gjidx_l_{id(self._relation)}"
-        right_name = f"_gjidx_r_{id(other._relation)}"
+        left_name = _temp_name("_gjidx_l")
+        right_name = _temp_name("_gjidx_r")
         self._connection.register(left_name, self._relation)
         other._connection.register(right_name, other._relation)
         result = {}
@@ -5154,7 +6556,7 @@ class DuckJanitor:
         out = target_column or f"{column}_ts"
         if column not in self._relation.columns:
             raise ValueError(f"to_datetime(): unknown column {column!r}")
-        temp_name = f"_todt_{id(self._relation)}"
+        temp_name = _temp_name("_todt")
         self._connection.register(temp_name, self._relation)
         format_arg = f", {self._sql_value(format)}" if format is not None else ""
         query = (

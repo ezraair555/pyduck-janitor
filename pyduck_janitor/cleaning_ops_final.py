@@ -23,6 +23,7 @@ from .cleaning_ops import (
     _validate_sql_fragment,
 )
 from .duck_janitor import DuckJanitor
+from ._sqlutil import temp_name as _temp_name
 
 # ========== Hybrid Layer (Materialize → Python → Re-wrap) ==========
 
@@ -149,8 +150,8 @@ def join_apply(
     if not isinstance(new_column_name, str) or not new_column_name.strip():
         raise ValueError("new_column_name must be a non-empty string")
 
-    temp_self = f"_self_{id(self._relation)}"
-    temp_other = f"_other_{id(other._relation)}"
+    temp_self = _temp_name("_self")
+    temp_other = _temp_name("_other")
     self._connection.register(temp_self, self._relation)
     try:
         self._connection.register(temp_other, other._relation)
@@ -270,8 +271,8 @@ def conditional_join(
 
     where_clause = " AND ".join(conditions) if conditions else "TRUE"
 
-    temp_self = f"_self_{id(relation)}"
-    temp_other = f"_other_{id(other_relation)}"
+    temp_self = _temp_name("_self")
+    temp_other = _temp_name("_other")
     conn.register(temp_self, relation)
     try:
         conn.register(temp_other, other_relation)

@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Iterable, Optional, Sequence, Union
 import duckdb
 
 from .cleaning_ops import _quote_id
+from ._sqlutil import temp_name as _temp_name
 
 if TYPE_CHECKING:
     from .duck_janitor import DuckJanitor
@@ -256,12 +257,10 @@ def _dplyr_join_impl(
     right_columns = list(other._relation.columns)
     right_renames = _renames_for_right(left_columns, right_columns, key_pairs, suffixes)
 
-    # Use id() of the relation (or attribute on DuckJanitor, if absent) to make
-    # the temp table name collision-free within a chain.
-    left_relation_obj = getattr(self, "_relation", None)
-    right_relation_obj = getattr(other, "_relation", None)
-    left_alias = f"_jl_{id(left_relation_obj)}"
-    right_alias = f"_jr_{id(right_relation_obj)}"
+    # Process-unique temp aliases keep concurrent/stale registrations from
+    # colliding with each other.
+    left_alias = _temp_name("_jl")
+    right_alias = _temp_name("_jr")
     conn.register(left_alias, self._relation)
     conn.register(right_alias, other._relation)
 
@@ -402,10 +401,8 @@ def semi_join(
     left_columns = list(self._relation.columns)
     right_columns = list(other._relation.columns)  # noqa: F841 — referenced via key_pairs
 
-    left_relation_obj = self._relation
-    right_relation_obj = other._relation
-    left_alias = f"_jl_{id(left_relation_obj)}"
-    right_alias = f"_jr_{id(right_relation_obj)}"
+    left_alias = _temp_name("_jl")
+    right_alias = _temp_name("_jr")
     conn.register(left_alias, self._relation)
     conn.register(right_alias, other._relation)
 
@@ -455,8 +452,8 @@ def anti_join(
     )
     left_columns = list(self._relation.columns)
 
-    left_alias = f"_jl_{id(self._relation)}"
-    right_alias = f"_jr_{id(other._relation)}"
+    left_alias = _temp_name("_jl")
+    right_alias = _temp_name("_jr")
     conn.register(left_alias, self._relation)
     conn.register(right_alias, other._relation)
 

@@ -8,6 +8,7 @@ from typing import Any, Optional, Union
 
 import duckdb
 
+from ._sqlutil import temp_name as _temp_name
 from .cleaning_ops import (
     _ensure_columns_exist,
     _quote_id,
@@ -326,7 +327,7 @@ def fill(
             partition = ""
 
         # Use a CTE to generate row index for ordering to avoid parser error on nested window functions
-        numbered_table = f"temp_numbered_{id(relation)}"
+        numbered_table = _temp_name("temp_numbered")
 
         if direction == "forward":
             fill_expr = (

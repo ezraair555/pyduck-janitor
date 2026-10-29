@@ -166,13 +166,17 @@ Complete function-by-function reference for every public method on
 Create a DuckJanitor from a pandas DataFrame.
 
 ```python
-from_pandas(df: pandas.DataFrame) -> 'DuckJanitor'
+from_pandas(df: pandas.DataFrame, *, connection: Optional[_duckdb.DuckDBPyConnection] = None) -> 'DuckJanitor'
 ```
 
 **Parameters**
 
 - **df** — pd.DataFrame
   The pandas DataFrame.
+- **connection** — duckdb.DuckDBPyConnection, optional
+  The connection to load the frame into. Defaults to the shared
+  in-memory connection. Pass a session's connection to load data
+  into that session's database.
 
 **Returns**
 
@@ -195,13 +199,15 @@ A DuckJanitor instance.
 Create a DuckJanitor from a CSV file.
 
 ```python
-from_csv(path: Union[str, pathlib.Path], **kwargs: Any) -> 'DuckJanitor'
+from_csv(path: Union[str, pathlib.Path], *, connection: Optional[_duckdb.DuckDBPyConnection] = None, **kwargs: Any) -> 'DuckJanitor'
 ```
 
 **Parameters**
 
 - **path** — str or Path
   Path to the CSV file.
+- **connection** — duckdb.DuckDBPyConnection, optional
+  The connection to read into. Defaults to the shared connection.
 - **kwargs**
   Additional arguments passed to DuckDB's read_csv.
 
@@ -230,7 +236,7 @@ API consistent with from_csv / from_parquet while relying on
 the mature openpyxl/xlrd ecosystem for parsing.
 
 ```python
-from_excel(path: Union[str, pathlib.Path], sheet_name: Union[str, int, NoneType] = 0, header: int = 0, usecols: Union[str, list[str], list[int], NoneType] = None, skiprows: Union[int, list[int], NoneType] = None, nrows: Optional[int] = None, na_values: Optional[Any] = None, keep_default_na: bool = True, dtype: Optional[dict[str, Any]] = None, engine: Optional[str] = None, **kwargs: Any) -> 'DuckJanitor'
+from_excel(path: Union[str, pathlib.Path], sheet_name: Union[str, int, NoneType] = 0, header: int = 0, *, connection: Optional[_duckdb.DuckDBPyConnection] = None, usecols: Union[str, list[str], list[int], NoneType] = None, skiprows: Union[int, list[int], NoneType] = None, nrows: Optional[int] = None, na_values: Optional[Any] = None, keep_default_na: bool = True, dtype: Optional[dict[str, Any]] = None, engine: Optional[str] = None, **kwargs: Any) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -243,6 +249,9 @@ from_excel(path: Union[str, pathlib.Path], sheet_name: Union[str, int, NoneType]
   used here — pass a specific name/index to control).
 - **header** — int, optional
   Row (0-indexed) to use as column names. Default 0.
+- **connection** — duckdb.DuckDBPyConnection, optional
+  The connection to load the sheet into. Defaults to the shared
+  connection.
 - **usecols** — str, list, or None, optional
   Column selector accepted by pandas.read_excel
   (e.g. ``"A:C"``, ``["Name", "Age"]``, ``[0, 2]``).
@@ -286,7 +295,7 @@ so schema inference, compression detection, and glob patterns
 all work out of the box.
 
 ```python
-from_json(path: Union[str, pathlib.Path, list[Union[str, pathlib.Path]]], format: str = 'auto', **kwargs: Any) -> 'DuckJanitor'
+from_json(path: Union[str, pathlib.Path, list[Union[str, pathlib.Path]]], format: str = 'auto', *, connection: Optional[_duckdb.DuckDBPyConnection] = None, **kwargs: Any) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -302,6 +311,8 @@ from_json(path: Union[str, pathlib.Path, list[Union[str, pathlib.Path]]], format
 - **format** — str, optional
   ``'auto'`` (default), ``'array'``, or ``'newline_delimited'``.
   ``'auto'`` lets DuckDB infer from file content/extension.
+- **connection** — duckdb.DuckDBPyConnection, optional
+  The connection to read into. Defaults to the shared connection.
 - **kwargs**
   Extra arguments forwarded to DuckDB's ``read_json_auto``
   (e.g. ``columns``, ``records``, ``maximum_object_size``).
@@ -330,13 +341,15 @@ A DuckJanitor instance.
 Create a DuckJanitor from Parquet file(s).
 
 ```python
-from_parquet(path: Union[str, pathlib.Path, list[str]]) -> 'DuckJanitor'
+from_parquet(path: Union[str, pathlib.Path, list[str]], *, connection: Optional[_duckdb.DuckDBPyConnection] = None) -> 'DuckJanitor'
 ```
 
 **Parameters**
 
 - **path** — str, Path, or list of str/Path
   Path(s) to Parquet file(s). Can be local or remote (s3://, http://).
+- **connection** — duckdb.DuckDBPyConnection, optional
+  The connection to read into. Defaults to the shared connection.
 
 **Returns**
 
@@ -364,7 +377,7 @@ connections and ``pyodbc`` connections for Microsoft SQL Server.
 The database driver remains an optional application dependency.
 
 ```python
-from_database(connection: Any, query: str, params: Optional[Any] = None, **kwargs: Any) -> 'DuckJanitor'
+from_database(connection: Any, query: str, params: Optional[Any] = None, *, target_connection: Optional[_duckdb.DuckDBPyConnection] = None, **kwargs: Any) -> 'DuckJanitor'
 ```
 
 **Parameters**
@@ -379,6 +392,9 @@ from_database(connection: Any, query: str, params: Optional[Any] = None, **kwarg
   Parameters passed unchanged to the database driver. Use the
   placeholder style required by that driver (for example ``?``
   for pyodbc or ``%s`` for many DB-API drivers).
+- **target_connection** — duckdb.DuckDBPyConnection, optional
+  The DuckDB connection to load the result into. Defaults to the
+  shared connection.
 - **kwargs**
   Additional arguments forwarded to ``pandas.read_sql_query``
   (for example ``parse_dates`` or ``dtype``).
@@ -985,15 +1001,34 @@ metrics(self, metrics: dict[str, typing.Any], *, group_by: Union[str, list[str],
 
 Return one profiling row per column using DuckDB aggregates.
 
+The profile covers null counts and rates, distinct counts and rates,
+min/max, and — for numeric columns — mean, standard deviation, and
+the requested quantiles. When *top_n* is greater than zero, a
+``top_values`` column holds the most frequent values for the column
+as a comma-separated list.
+
 ```python
-profile(self) -> 'DuckJanitor'
+profile(self, *, quantiles: Optional[list[float]] = None, top_n: int = 0) -> 'DuckJanitor'
 ```
 
-**Example** *(from verified snippet)*
+**Parameters**
+
+- **quantiles** — list of float, optional
+  Quantiles to compute for numeric columns, for example
+  ``[0.25, 0.5, 0.75]``. Default is ``[0.5]``.
+- **top_n** — int, optional
+  Number of most-frequent values to include per column. Default
+  is 0, which omits the column.
+
+**Returns**
+
+DuckJanitor
+A relation with one row per profiled column.
+
+**Example** *(from docstring)*
 
 ```python
->>> dj = DuckJanitor.from_pandas(pd.DataFrame({'a': [1, 2], 'b': ['x', None]}))
->>> dj.profile().collect()
+>>> dj.profile(quantiles=[0.5, 0.95], top_n=3).collect()
 ```
 
 
@@ -1144,14 +1179,22 @@ The first n rows.
 
 Execute a custom SQL query on the current relation.
 
+The word ``self`` in the query refers to the current relation. The
+substitution is aware of string literals, quoted identifiers, and
+comments, so ``'self'`` and ``"self"`` are left untouched.
+
 ```python
-sql(self, query: str) -> 'DuckJanitor'
+sql(self, query: str, **params: Any) -> 'DuckJanitor'
 ```
 
 **Parameters**
 
 - **query** — str
-  SQL query. Use 'self' to refer to the current relation.
+  SQL query. Use ``self`` to refer to the current relation.
+- **params**
+  Named parameters bound with DuckDB's ``$name`` syntax. Values
+  are passed to the driver rather than interpolated into the SQL,
+  so user data never becomes part of the statement text.
 
 **Returns**
 
@@ -1162,6 +1205,7 @@ Self for method chaining.
 
 ```python
 >>> dj.sql("SELECT * FROM self WHERE age > 18")
+>>> dj.sql("SELECT * FROM self WHERE dept = $dept", dept="Finance")
 ```
 
 
@@ -1172,19 +1216,32 @@ Self for method chaining.
 Show the query plan for the current pipeline.
 
 ```python
-explain(self) -> str
+explain(self, analyze: bool = False, *, format: str = 'text') -> str
 ```
+
+**Parameters**
+
+- **analyze** — bool, optional
+  When True, run ``EXPLAIN ANALYZE`` so the plan includes actual
+  execution statistics. Default is False.
+- **format** — str, optional
+  ``'text'`` (default) returns the plan as plain text.
+  ``'json'`` returns DuckDB's JSON profiling output.
 
 **Returns**
 
 str
 The query plan.
 
-**Example** *(from verified snippet)*
+**Example** *(from docstring)*
 
 ```python
->>> dj = DuckJanitor.from_pandas(df)
->>> dj.filter_on('a > 1').explain()
+>>> print(dj.clean_names().explain())
+>>> ┌───────────────────────────┐
+>>> │ physical_plan             │
+>>> ├───────────────────────────┤
+>>> │ ...                       │
+>>> └───────────────────────────┘
 ```
 
 
@@ -1193,6 +1250,10 @@ The query plan.
 ### get_shared_connection
 
 Get or create the global shared DuckDB connection.
+
+The connection is created under a lock so that concurrent first use
+from multiple threads cannot create two connections and leave one
+orphaned.
 
 ```python
 get_shared_connection() -> _duckdb.DuckDBPyConnection

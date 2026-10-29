@@ -4,6 +4,111 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## 0.4.0 - 2026-10-29
+
+The release that turns pyduck-janitor from a pandas-backed cleaning library
+into a DuckDB-native one. pandas is no longer the only way in or out.
+
+### Added — Native output and write-back
+Previously the only exit from a pipeline was `collect()`, which called
+`relation.df()` and pulled the entire result into pandas — defeating the
+out-of-core promise of the package. Now results land directly in DuckDB
+formats and destinations:
+- `to_parquet()`, `to_csv()`, `to_json()` (array or newline-delimited),
+  `to_table()`, `to_view()` — all via DuckDB's `COPY ... TO` /
+  `CREATE ... AS`, never through pandas.
+- `write_relation()` — the generic `COPY ... TO` escape hatch with
+  format, compression, delimiter, and header options.
+- `to_arrow()` (zero-copy Arrow table) and `to_polars()`.
+- `io_ops.py` is the new module that owns this surface.
+
+### Added — Sessions, persistence, and catalog
+- `DuckJanitor.connect(path)` opens a file-backed DuckDB database and
+  returns a session object that owns its connection.
+- `attach()`, `detach()`, `tables()`, `databases()`, `begin()`, `commit()`,
+  `rollback()`, `close()`, and `__enter__`/`__exit__` for `with` blocks.
+- Every loader (`from_pandas`, `from_parquet`, `from_csv`, `from_json`,
+  `from_excel`, `from_database`) now accepts `connection=`, so data can be
+  loaded into a session's database rather than only the shared connection.
+
+### Added — Inspection and diagnostics
+- `.columns`, `.dtypes`, `.shape`, `.count()`, `.relation`, `.connection` —
+  cheap metadata without materialising the frame.
+- `show()` renders a DuckDB-style box table; `glimpse()` aliases `head()`.
+- `_repr_html_` gives Jupyter a rich schema + preview instead of a bare
+  one-line repr.
+- `explain(analyze=False, format='text')` now returns readable plan text.
+  The previous implementation returned the raw `str(fetchall())` tuple
+  repr, which was unusable.
+
+### Added — Sampling and Python UDFs (`sampling.py`)
+- `sample(n=..., frac=..., seed=..., method=...)` via DuckDB's `USING SAMPLE`,
+  replacing the full `ORDER BY random()` sort that `shuffle()` required.
+- `sample_rows()` for a deterministic N-row pick without a full sort.
+- `approx_distinct()`, `approx_quantile()`.
+- `register_python_function()` and `apply_python_function()` register a
+  Python callable as a DuckDB scalar UDF, so user logic runs *inside*
+  DuckDB instead of forcing a pandas round-trip.
+
+### Added — Nested and typed data (`nested_ops.py`)
+- `to_struct()` / `from_struct()`, `to_list()` / `from_list()`, `unnest()`.
+- `list_transform()`, `list_filter()`, `list_transforms()` — DuckDB lambdas
+  over LIST columns.
+- `json_extract()` — JSON pointer extraction from a JSON column.
+
+### Fixed — Correctness and safety
+- **`add_column()` and `filter_column()` no longer silently degrade a user
+  error into a wrong result.** Previously any exception during SQL
+  interpretation was caught and the value was stored as a string literal
+  instead, so a typo'd column name became data with no warning. A fragment
+  that references a known column now raises a `ValueError` naming the
+  available columns; only text that clearly is not an expression still
+  falls back to a literal.
+- **`sql()` no longer rewrites the word `self` inside string literals.**
+  The old regex substitution corrupted queries such as
+  `SELECT 'self' FROM self`. Substitution is now literal-, identifier-, and
+  comment-aware (`_sqlutil.substitute_self`).
+- **`sql()` supports parameter binding** (`$name` placeholders) so user
+  values never become part of the statement text.
+- **Temporary relation names are process-unique.** Names were built from
+  `id(relation)`, and CPython reuses the address of a garbage-collected
+  object, so a stale registration could collide with a new relation. All
+  names now come from a monotonic counter (`_sqlutil.temp_name`).
+- **`asof_join()` uses DuckDB's native `ASOF LEFT JOIN`** for the backward
+  and forward directions instead of a 190-line rank-and-filter emulation.
+  The right side is de-duplicated first so the surviving row matches the
+  previous tie-breaking exactly, and tolerance still nulls the right-hand
+  columns while preserving the left row.
+- **`deduplicate()` uses `QUALIFY`** rather than a wrapping CTE.
+- The shared connection is now created under a lock, so concurrent first
+  use cannot create two connections.
+
+### Changed
+- `profile()` now reports mean, standard deviation, the requested
+  quantiles, and the most-frequent values, in addition to null and
+  distinct statistics.
+- The `duckdb` pin is relaxed to `>=1.5.2,<1.6` to match what the test
+  matrix actually proves.
+- `ruff` `target-version` corrected to `py310` to match `requires-python`.
+- The `pytest` `pythonpath = ["src"]` setting was removed — there is no
+  `src/` directory.
+- OptBinning's HiGHS `UserWarning` filter is scoped so warnings from other
+  libraries still surface.
+
+### Test and CI
+- Measured coverage is now **81%** (was 77%), with `fail_under = 80`
+  enforced in `pyproject.toml` and a new `coverage` CI job.
+- Test suite grew from **364 to 561 tests**.
+- `bins_opt.py` — the 0.3.0 headline feature — went from **4% coverage and
+  zero tests to 85% coverage** with a dedicated suite.
+- The orphaned Hypothesis suite (`tests/property_cleaning_ops.py`, gitignored
+  and misnamed so it never ran) is revived as
+  `tests/test_property_cleaning_ops.py` and skips cleanly when Hypothesis
+  is absent.
+- The public-package contract check now covers every 0.4.0 verb.
+
+## [Unreleased]
+
 ### Added
 - **Supervised binning** (`optimize_bins_to_target`, new module
   `pyduck_janitor/bins_opt.py`, chainable on `DuckJanitor`): learn optimal

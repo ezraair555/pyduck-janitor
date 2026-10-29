@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyduck-janitor"
-version = "0.3.0"
+version = "0.4.0"
 description = "DuckDB-backed pyjanitor for high-performance data cleaning, text search, and vector similarity on large datasets"
 readme = "README.md"
 license = "MIT"
@@ -23,7 +23,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Mathematics",
 ]
 dependencies = [
-    "duckdb>=1.5.5,<1.6",
+    "duckdb>=1.5.2,<1.6",
     "pandas>=1.5.0",
     "numpy>=1.20.0",
 ]
@@ -38,10 +38,14 @@ dev = [
     "ruff>=0.6.0",
     "openpyxl>=3.1",
     "pyarrow>=15.0",
+    "hypothesis>=6.0",
 ]
 io = [
     "openpyxl>=3.1",
     "pyarrow>=15.0",
+]
+polars = [
+    "polars>=0.20",
 ]
 vss = [
     "sentence-transformers>=2.2",
@@ -55,11 +59,11 @@ embeddings = [
 ]
 graph = [
     # Onager is installed at runtime from DuckDB's community repository.
-    "duckdb>=1.5.5,<1.6",
+    "duckdb>=1.5.2,<1.6",
 ]
 diff = [
     # duck_diff is installed at runtime from DuckDB's community repository.
-    "duckdb>=1.5.5,<1.6",
+    "duckdb>=1.5.2,<1.6",
 ]
 text = [
     # icu + fts ship with the DuckDB Python wheel; this extra is a
@@ -84,12 +88,30 @@ include = ["pyduck_janitor*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
 addopts = "-ra --strict-markers"
+
+[tool.coverage.run]
+source = ["pyduck_janitor"]
+branch = true
+
+[tool.coverage.report]
+# The 0.4.0 release target is 80% measured coverage. The optional
+# extension paths (vss / embeddings / onager / duck_diff) are excluded
+# because they require network installs or heavyweight model downloads.
+fail_under = 80
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+exclude_also = [
+    "if __name__ == .__main__.:",
+    "if _?importorskip",
+]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 # N818 would break the public

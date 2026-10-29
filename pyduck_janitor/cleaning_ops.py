@@ -10,6 +10,7 @@ from collections.abc import Iterable
 from typing import Any, Callable, Optional, Union
 
 import duckdb
+from ._sqlutil import temp_name as _temp_name
 
 
 def _quote_id(name: str) -> str:
@@ -36,9 +37,41 @@ def _register_relation(
         raise ValueError(
             "A DuckDB connection is required. Pass the connection that owns the relation."
         )
-    table_name = f"_temp_{id(relation)}"
+    table_name = _temp_name("_temp")
     conn.register(table_name, relation)
     return table_name
+
+
+def _references_known_column(fragment: str, columns: Iterable[str]) -> bool:
+    """Return True when *fragment* appears to reference one of *columns*.
+
+    Used to decide whether a string argument was intended as a SQL
+    expression or as a plain literal. An expression that names a real
+    column is unambiguous, so a failure to bind it is a user error that
+    should be raised rather than silently downgraded to a literal.
+
+    Parameters
+    ----------
+    fragment : str
+        The candidate SQL fragment.
+    columns : iterable of str
+        The column names available in the relation.
+
+    Returns
+    -------
+    bool
+        True when at least one known column name appears as a word in the
+        fragment.
+    """
+    available = [str(column) for column in columns]
+    if not available:
+        return False
+    pattern = (
+        r"\b(?:"
+        + "|".join(re.escape(name) for name in sorted(available, key=len, reverse=True))
+        + r")\b"
+    )
+    return bool(re.search(pattern, fragment))
 
 
 def _ensure_columns_exist(
@@ -275,20 +308,36 @@ def add_column(
         # Validate the fragment only when we attempt SQL interpretation.
         try:
             _validate_sql_fragment(values, context="Column expression")
-            query = f"SELECT *, ({values}) AS {_quote_id(column_name)} FROM {table_name}"
+        except ValueError:
+            # The fragment is not a permitted SQL expression (it contains a
+            # semicolon, a comment, or a statement keyword). Treat it as a
+            # plain string literal.
+            literal_val = _sql_literal(values)
+            query = f"SELECT *, {literal_val} AS {_quote_id(column_name)} FROM {table_name}"
+            return conn.query(query)
+
+        # The fragment passed validation. If it names one of the relation's
+        # own columns it was clearly meant as a SQL expression, so a binder
+        # error is a user error and must be raised -- never silently
+        # downgraded to a string literal.
+        looks_like_expression = _references_known_column(values, relation.columns)
+        try:
             # Test query execution (using LIMIT 0 to avoid computing rows)
             conn.execute(f"SELECT ({values}) FROM {table_name} LIMIT 0")
-            return conn.query(query)
-        except ValueError:
-            # Validation rejected the fragment — treat as string literal.
+        except Exception as exc:
+            if looks_like_expression:
+                raise ValueError(
+                    f"add_column(): could not evaluate the SQL expression {values!r} "
+                    f"against the relation. Available columns: {list(relation.columns)}. "
+                    "Pass as_literal=True to store the value as a string instead."
+                ) from exc
+            # Not column-referencing text: treat it as a literal string.
             literal_val = _sql_literal(values)
             query = f"SELECT *, {literal_val} AS {_quote_id(column_name)} FROM {table_name}"
             return conn.query(query)
-        except Exception:
-            # If binder/parsing exception (like missing column reference), treat as string literal
-            literal_val = _sql_literal(values)
-            query = f"SELECT *, {literal_val} AS {_quote_id(column_name)} FROM {table_name}"
-            return conn.query(query)
+
+        query = f"SELECT *, ({values}) AS {_quote_id(column_name)} FROM {table_name}"
+        return conn.query(query)
     elif isinstance(values, list):
         # Create from list - need to use a different approach
         # For simplicity, convert to pandas, add column, convert back
@@ -488,14 +537,21 @@ def filter_column(
     if isinstance(criteria, str):
         _validate_sql_fragment(criteria, context="Filter criteria")
         # Try executing as raw SQL WHERE clause first
+        looks_like_expression = _references_known_column(criteria, relation.columns)
         try:
             query_test = f"SELECT 1 FROM {table_name} WHERE {criteria} LIMIT 0"
             conn.execute(query_test)
             # Valid raw SQL WHERE clause
             query = f"SELECT * FROM {table_name} WHERE {criteria}"
             return conn.query(query)
-        except Exception:
-            pass
+        except Exception as exc:
+            if looks_like_expression:
+                raise ValueError(
+                    f"filter_column(): could not evaluate the criteria {criteria!r} "
+                    f"against the relation. Available columns: {list(relation.columns)}. "
+                    "Pass a literal value to filter by equality instead."
+                ) from exc
+            # Not column-referencing text: treat it as a literal value.
 
     # Fallback: treat criteria as a literal value and compare for equality
     literal_val = _sql_literal(criteria)

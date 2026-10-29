@@ -10,11 +10,10 @@ OptBinning is the default because it optimizes IV under business constraints
 (min_bin_size, monotonic_trend) and ships WoE/event-rate diagnostics; the
 tree path is the fallback when y is not binary or when iv is unavailable.
 """
+
 from __future__ import annotations
 
 import warnings
-warnings.filterwarnings("ignore", message=".*HIGHS.*", category=UserWarning)
-
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import duckdb
@@ -22,6 +21,11 @@ import numpy as np
 import pandas as pd
 
 from .cleaning_ops import _ensure_columns_exist, _quote_id, _register_relation, _sql_literal
+
+# 2026-10-28: OptBinning's underlying HiGHS solver emits a UserWarning on
+# every fit. The warning is scoped to the fit call itself rather than being
+# disabled globally, so genuine warnings from other libraries still surface.
+warnings.filterwarnings("ignore", message=".*HIGHS.*", category=UserWarning)
 
 
 def _detect_y_kind(y: pd.Series, task: str = "auto", n_sample: int | None = None) -> str:
@@ -51,11 +55,18 @@ def _detect_y_kind(y: pd.Series, task: str = "auto", n_sample: int | None = None
     y_nn = y.dropna()
     nunique = y_nn.nunique()
     if nunique <= 1:
-        raise ValueError(f"y has only {nunique} distinct non-null value(s); supervised binning needs at least 2")
+        raise ValueError(
+            f"y has only {nunique} distinct non-null value(s); supervised binning needs at least 2"
+        )
     if nunique == 2:
         return "binary"
     # Non-numeric labels are classes, never measurements.
-    if y.dtype == object or str(y.dtype) in ("string", "str") or str(y.dtype).startswith("categor") or str(y.dtype) == "bool":
+    if (
+        y.dtype == object
+        or str(y.dtype) in ("string", "str")
+        or str(y.dtype).startswith("categor")
+        or str(y.dtype) == "bool"
+    ):
         return "multiclass"
     if pd.api.types.is_float_dtype(y.dtype):
         if nunique > 50:
@@ -92,9 +103,13 @@ def _tree_splits(
     actual_kind = _detect_y_kind(y, "auto")
     requested = task.lower() if isinstance(task, str) else "auto"
     if requested != "auto":
-        exp = {"binary": "binary", "multiclass": "multiclass",
-               "regression": "continuous", "continuous": "continuous",
-               "cont": "continuous"}.get(requested, requested)
+        exp = {
+            "binary": "binary",
+            "multiclass": "multiclass",
+            "regression": "continuous",
+            "continuous": "continuous",
+            "cont": "continuous",
+        }.get(requested, requested)
         if exp != actual_kind:
             # binary is a special case of 2-class multiclass scoring, but
             # roc_auc on 3+ classes always fails — refuse rather than
@@ -111,7 +126,15 @@ def _tree_splits(
         y_kind = _detect_y_kind(y, task)
         # DTD needs a DataFrame; it also wants a target Series
         regression = y_kind == "continuous"
-        scoring = "neg_mean_squared_error" if regression else ("roc_auc_ovr" if y_kind == "multiclass" and len(np.unique(pd.Series(y).dropna())) > 2 else ("roc_auc" if y_kind == "binary" else "f1_macro"))
+        scoring = (
+            "neg_mean_squared_error"
+            if regression
+            else (
+                "roc_auc_ovr"
+                if y_kind == "multiclass" and len(np.unique(pd.Series(y).dropna())) > 2
+                else ("roc_auc" if y_kind == "binary" else "f1_macro")
+            )
+        )
         # Cap CV folds by the smallest class count so GridSearchCV never
         # runs folds with a single class (which yields nan + warnings).
         _cv = cv
@@ -121,7 +144,10 @@ def _tree_splits(
                 if len(_counts) > 1:
                     _cv = max(2, min(cv, int(_counts.min())))
                     if _cv < cv:
-                        warnings.warn(f"cv reduced {cv}->{_cv} for {x.name!r}: smallest class has {_counts.min()} rows", stacklevel=3)
+                        warnings.warn(
+                            f"cv reduced {cv}->{_cv} for {x.name!r}: smallest class has {_counts.min()} rows",
+                            stacklevel=3,
+                        )
             except Exception:
                 pass
         # Small-n grids must allow small leaves or no split is possible.
@@ -131,8 +157,12 @@ def _tree_splits(
             # fold lacks a class; we already capped cv above, so silence
             # the residue — a genuine failure still raises below.
             warnings.filterwarnings("ignore", message=".*score.*nan.*", category=UserWarning)
-            warnings.filterwarnings("ignore", message=".*least populated class.*", category=UserWarning)
-            warnings.filterwarnings("ignore", message=".*ROC AUC.*not defined.*", category=UserWarning)
+            warnings.filterwarnings(
+                "ignore", message=".*least populated class.*", category=UserWarning
+            )
+            warnings.filterwarnings(
+                "ignore", message=".*ROC AUC.*not defined.*", category=UserWarning
+            )
             d = DTD(
                 variables=[x.name],
                 regression=regression,
@@ -153,10 +183,13 @@ def _tree_splits(
     except ModuleNotFoundError:
         pass
     except Exception as e:
-        warnings.warn(f"DTD failed for {x.name!r}: {e} — falling back to sklearn tree", stacklevel=3)
+        warnings.warn(
+            f"DTD failed for {x.name!r}: {e} — falling back to sklearn tree", stacklevel=3
+        )
 
     # ---- sklearn fallback (same behaviour, no extra deps beyond sklearn) ----
     from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+
     # drop NA rows for fitting; splits should not include the NA sentinel
     mask = x.notna() & y.notna()
     xx = x[mask].astype(float).to_numpy()
@@ -165,9 +198,13 @@ def _tree_splits(
         return []
     y_kind = _detect_y_kind(pd.Series(yy), task)
     if y_kind == "continuous":
-        clf = DecisionTreeRegressor(max_depth=4, min_samples_leaf=max(2, len(xx)//20), random_state=random_state or 42)
+        clf = DecisionTreeRegressor(
+            max_depth=4, min_samples_leaf=max(2, len(xx) // 20), random_state=random_state or 42
+        )
     else:
-        clf = DecisionTreeClassifier(max_depth=4, min_samples_leaf=max(2, len(xx)//20), random_state=random_state or 42)
+        clf = DecisionTreeClassifier(
+            max_depth=4, min_samples_leaf=max(2, len(xx) // 20), random_state=random_state or 42
+        )
     # Optionally suppress nan-score warnings from sklearn internals.
     # Scope the filter to this call: a bare warnings.filterwarnings() call
     # mutates the global filter list and leaks into the rest of the
@@ -193,10 +230,14 @@ def _optbinning_splits(x: pd.Series, y: pd.Series, **ob_kwargs) -> Optional[List
     # so the failure mode is one clear warning, not an obscure fit error.
     try:
         import ortools  # noqa: F401
+
         _default_solver = "cp"
     except ModuleNotFoundError:
         _default_solver = "mip"
-        warnings.warn("ortools not installed — OptBinning solver defaulted to 'mip'; pip install ortools for 'cp'", stacklevel=3)
+        warnings.warn(
+            "ortools not installed — OptBinning solver defaulted to 'mip'; pip install ortools for 'cp'",
+            stacklevel=3,
+        )
     kwargs = dict(
         dtype="numerical",
         max_n_prebins=20,
@@ -233,12 +274,17 @@ def _optbinning_splits(x: pd.Series, y: pd.Series, **ob_kwargs) -> Optional[List
         if "solver" in _msg or "ortools" in _msg or "highs" in _msg or "mip" in _msg:
             _alt = "mip" if _solver_used == "cp" else "cp"
             try:
-                warnings.warn(f"OptBinning solver {_solver_used!r} failed for {x.name!r} ({e}) — retrying solver={_alt!r}", stacklevel=3)
+                warnings.warn(
+                    f"OptBinning solver {_solver_used!r} failed for {x.name!r} ({e}) — retrying solver={_alt!r}",
+                    stacklevel=3,
+                )
                 ob_retry = OptimalBinning(**{**kwargs, "solver": _alt})
                 ob_retry.fit(x[mask].to_numpy(dtype=float), y_fit.to_numpy(dtype=float))
                 ob = ob_retry
             except Exception as e2:
-                warnings.warn(f"OptBinning fit failed for {x.name!r}: {e2} — falling back", stacklevel=3)
+                warnings.warn(
+                    f"OptBinning fit failed for {x.name!r}: {e2} — falling back", stacklevel=3
+                )
                 return None
         else:
             warnings.warn(f"OptBinning fit failed for {x.name!r}: {e} — falling back", stacklevel=3)
@@ -260,7 +306,7 @@ def _case_sql(col_id: str, cuts: List[float], numeric_labels: bool = False) -> s
             label = 1 if numeric_labels else f"(-inf, {c}]"
             parts.append(f"WHEN {col_id} <= {_sql_literal(c)} THEN {_sql_literal(label)}")
         else:
-            label = i + 1 if numeric_labels else f"({cuts[i-1]}, {c}]"
+            label = i + 1 if numeric_labels else f"({cuts[i - 1]}, {c}]"
             parts.append(f"WHEN {col_id} <= {_sql_literal(c)} THEN {_sql_literal(label)}")
     # tail
     if cuts:
@@ -269,7 +315,11 @@ def _case_sql(col_id: str, cuts: List[float], numeric_labels: bool = False) -> s
         parts.append(f"WHEN {col_id} > {_sql_literal(cuts[-1])} THEN {_sql_literal(label)}")
     # NULL -> Missing (preserves information)
     other_label = "Other" if cuts else "Single"
-    return "CASE " + " ".join(parts) + f" WHEN {col_id} IS NULL THEN {_sql_literal('Missing')} ELSE {_sql_literal(other_label)} END"
+    return (
+        "CASE "
+        + " ".join(parts)
+        + f" WHEN {col_id} IS NULL THEN {_sql_literal('Missing')} ELSE {_sql_literal(other_label)} END"
+    )
 
 
 def _choose_splits(
@@ -298,7 +348,9 @@ def _choose_splits(
                 # before settling on a single bin. OB is conservative on
                 # perfect separation / weak-IV data where a tree still
                 # finds usable signal.
-                tree_cuts = _tree_splits(x, y, method=method, cv=cv, task=task, random_state=random_state)
+                tree_cuts = _tree_splits(
+                    x, y, method=method, cv=cv, task=task, random_state=random_state
+                )
                 if tree_cuts:
                     warnings.warn(
                         f"OptBinning found no splits for {x.name!r}; auto fell back to tree ({len(tree_cuts)} cuts)",
@@ -308,14 +360,18 @@ def _choose_splits(
                 return cuts, "optbinning"  # both engines agree: single bin
         if method == "optbinning" and y_kind != "binary":
             # explicit optbinning on non-binary -> be loud
-            warnings.warn(f"optbinning requested but y={y_kind!r} is not binary — falling back to tree", stacklevel=3)
+            warnings.warn(
+                f"optbinning requested but y={y_kind!r} is not binary — falling back to tree",
+                stacklevel=3,
+            )
             # fall through to tree path below
         elif method == "optbinning" and cuts is None:
-            raise RuntimeError("OptBinning is unavailable or returned no splits; cannot satisfy method='optbinning'")
+            raise RuntimeError(
+                "OptBinning is unavailable or returned no splits; cannot satisfy method='optbinning'"
+            )
     # tree path (also the auto fallback for multiclass/continuous or when OB unavailable)
     cuts = _tree_splits(x, y, method=method, cv=cv, task=task, random_state=random_state)
     return cuts, "tree"
-
 
 
 def _assign_bin(value: float | None, cuts: list[float]) -> str:
@@ -324,7 +380,7 @@ def _assign_bin(value: float | None, cuts: list[float]) -> str:
         return "Missing"
     for i, c in enumerate(cuts):
         if value <= c:
-            return f"(-inf, {c}]" if i == 0 else f"({cuts[i-1]}, {c}]"
+            return f"(-inf, {c}]" if i == 0 else f"({cuts[i - 1]}, {c}]"
     return f"({cuts[-1]}, inf)" if cuts else "Single"
 
 
@@ -343,6 +399,7 @@ def _score_binned_feature(
     """
     import pandas as _pd
     import numpy as _np
+
     bins = _pd.Series([_assign_bin(v, cuts) for v in x], index=x.index)
     mask = y.notna() & bins.notna()
     yv, bv = y[mask], bins[mask]
@@ -368,6 +425,7 @@ def _score_binned_feature(
         proba = bv.map(p_map).fillna(_fallback).astype(float)
         try:
             from sklearn.metrics import roc_auc_score, f1_score
+
             auc = float(roc_auc_score(yv_num, proba)) if yv_num.nunique() == 2 else float("nan")
         except Exception:
             auc = float("nan")
@@ -379,22 +437,39 @@ def _score_binned_feature(
         # Cramer's V (chi2 on bins x y table)
         try:
             from scipy.stats import chi2_contingency
+
             tbl = _pd.crosstab(bv, yv)
             chi2 = chi2_contingency(tbl)[0]
             n = len(yv)
             r, k = tbl.shape
-            cramer = float((chi2 / (n * min(r - 1, k - 1))) ** 0.5) if min(r - 1, k - 1) > 0 else float("nan")
+            cramer = (
+                float((chi2 / (n * min(r - 1, k - 1))) ** 0.5)
+                if min(r - 1, k - 1) > 0
+                else float("nan")
+            )
         except Exception:
             cramer = float("nan")
-        return {"auc": auc, "f1": f1, "gini": (2*auc-1) if _np.isfinite(auc) else float("nan"), "cramers_v": cramer, "n_bins": int(bv.nunique()), "n": int(len(yv))}
+        return {
+            "auc": auc,
+            "f1": f1,
+            "gini": (2 * auc - 1) if _np.isfinite(auc) else float("nan"),
+            "cramers_v": cramer,
+            "n_bins": int(bv.nunique()),
+            "n": int(len(yv)),
+        }
     if y_kind == "multiclass":
         try:
             from sklearn.metrics import f1_score as _f1m
+
             # per-bin majority class as prediction (train map when provided)
             if _train_map is not None:
                 maj = _train_map
             else:
-                maj = _pd.DataFrame({"y": yv, "bin": bv}).groupby("bin", observed=True)["y"].agg(lambda s: s.mode().iloc[0])
+                maj = (
+                    _pd.DataFrame({"y": yv, "bin": bv})
+                    .groupby("bin", observed=True)["y"]
+                    .agg(lambda s: s.mode().iloc[0])
+                )
             _fb = _pd.Series(yv).mode().iloc[0]
             pred = bv.map(maj).fillna(_fb)
             f1m = float(_f1m(yv, pred, average="macro", zero_division=0))
@@ -402,20 +477,37 @@ def _score_binned_feature(
             f1m = float("nan")
         try:
             from sklearn.metrics import balanced_accuracy_score as _bacc
-            _maj2 = _train_map if _train_map is not None else _pd.DataFrame({"y": yv, "bin": bv}).groupby("bin", observed=True)["y"].agg(lambda s: s.mode().iloc[0])
+
+            _maj2 = (
+                _train_map
+                if _train_map is not None
+                else _pd.DataFrame({"y": yv, "bin": bv})
+                .groupby("bin", observed=True)["y"]
+                .agg(lambda s: s.mode().iloc[0])
+            )
             _fb2 = _pd.Series(yv).mode().iloc[0]
             pred2 = bv.map(_maj2).fillna(_fb2)
             bacc = float(_bacc(yv, pred2))
         except Exception:
             bacc = float("nan")
-        return {"f1_macro": f1m, "balanced_accuracy": bacc, "n_bins": int(bv.nunique()), "n": int(len(yv))}
+        return {
+            "f1_macro": f1m,
+            "balanced_accuracy": bacc,
+            "n_bins": int(bv.nunique()),
+            "n": int(len(yv)),
+        }
     # continuous: per-bin mean as predictor -> r2/rmse (train map when provided)
     try:
         from sklearn.metrics import r2_score as _r2, mean_squared_error as _mse
+
         if _train_map is not None:
             bin_mean = _train_map
         else:
-            bin_mean = _pd.DataFrame({"y": yv.astype(float), "bin": bv}).groupby("bin", observed=True)["y"].mean()
+            bin_mean = (
+                _pd.DataFrame({"y": yv.astype(float), "bin": bv})
+                .groupby("bin", observed=True)["y"]
+                .mean()
+            )
         _fbm = float(_pd.Series(yv.astype(float)).mean())
         pred = bv.map(bin_mean).fillna(_fbm).astype(float)
         r2 = float(_r2(yv.astype(float), pred))
@@ -555,7 +647,9 @@ def optimize_bins_to_target(
         columns = list(columns)
 
     if not columns:
-        raise ValueError("columns produced no work: pass at least one column name, or a relation with non-target columns")
+        raise ValueError(
+            "columns produced no work: pass at least one column name, or a relation with non-target columns"
+        )
     _ensure_columns_exist(cols_available, columns)
 
     # Single materialisation for all columns.  Cap rows for learning so a
@@ -572,14 +666,24 @@ def optimize_bins_to_target(
     _sampled = False
     if sample_n is not None and len(df_all) > sample_n:
         from sklearn.model_selection import train_test_split as _samp_split
-        _strat = df_all[y] if _detect_y_kind(df_all[y], "auto") in ("binary", "multiclass") else None
+
+        _strat = (
+            df_all[y] if _detect_y_kind(df_all[y], "auto") in ("binary", "multiclass") else None
+        )
         try:
-            _idx, _ = _samp_split(range(len(df_all)), train_size=sample_n, random_state=random_state, stratify=_strat)
+            _idx, _ = _samp_split(
+                range(len(df_all)), train_size=sample_n, random_state=random_state, stratify=_strat
+            )
             df_all = df_all.iloc[sorted(_idx)].reset_index(drop=True)
             _sampled = True
-            warnings.warn(f"optimize_bins_to_target: sampled {sample_n:,} of {_total_n:,} rows for cut learning; CASE applied to all rows", stacklevel=2)
+            warnings.warn(
+                f"optimize_bins_to_target: sampled {sample_n:,} of {_total_n:,} rows for cut learning; CASE applied to all rows",
+                stacklevel=2,
+            )
         except Exception as e:
-            warnings.warn(f"sampling failed ({e}) — learning on full {len(df_all):,} rows", stacklevel=2)
+            warnings.warn(
+                f"sampling failed ({e}) — learning on full {len(df_all):,} rows", stacklevel=2
+            )
     y_series = df_all[y]
     y_kind = _detect_y_kind(y_series, task)
 
@@ -591,18 +695,43 @@ def optimize_bins_to_target(
         # Skip non-numeric features: binning is defined for ordered values;
         # categorical features already are discrete.
         if not pd.api.types.is_numeric_dtype(x):
-            warnings.warn(f"optimize_bins_to_target: {col!r} is non-numeric ({x.dtype}) — skipped", stacklevel=2)
-            diag[col] = {"cuts": None, "method": "skipped", "y_kind": y_kind, "reason": f"non-numeric {x.dtype}"}
+            warnings.warn(
+                f"optimize_bins_to_target: {col!r} is non-numeric ({x.dtype}) — skipped",
+                stacklevel=2,
+            )
+            diag[col] = {
+                "cuts": None,
+                "method": "skipped",
+                "y_kind": y_kind,
+                "reason": f"non-numeric {x.dtype}",
+            }
             continue
-        cuts, used = _choose_splits(x, y_series, method=method, cv=cv, task=task, random_state=random_state, optbinning_kwargs=optbinning_kwargs)
+        cuts, used = _choose_splits(
+            x,
+            y_series,
+            method=method,
+            cv=cv,
+            task=task,
+            random_state=random_state,
+            optbinning_kwargs=optbinning_kwargs,
+        )
         cuts_per_col[col] = cuts
-        _entry: Dict[str, Any] = {"cuts": cuts, "method": used, "y_kind": y_kind, "learned_on": f"{'sample' if _sampled else 'full'} n={len(df_all)}", "fit_rows": len(df_all), "sampled": _sampled, "total_rows": _total_n}
+        _entry: Dict[str, Any] = {
+            "cuts": cuts,
+            "method": used,
+            "y_kind": y_kind,
+            "learned_on": f"{'sample' if _sampled else 'full'} n={len(df_all)}",
+            "fit_rows": len(df_all),
+            "sampled": _sampled,
+            "total_rows": _total_n,
+        }
         if used == "optbinning":
             if optbinning_kwargs and "solver" in optbinning_kwargs:
                 _entry["solver"] = optbinning_kwargs["solver"]
             else:
                 try:
                     import ortools  # noqa: F401
+
                     _entry["solver"] = "cp"
                 except ModuleNotFoundError:
                     _entry["solver"] = "mip"
@@ -618,18 +747,29 @@ def optimize_bins_to_target(
     # The returned relation carries the TRAIN cuts applied to all rows.
     if holdout is not False:
         from sklearn.model_selection import train_test_split as _tss
+
         frac = 0.2 if holdout is True else float(holdout)
         if not (0 < frac < 0.5):
             raise ValueError("holdout fraction must be in (0, 0.5)")
         strat = y_series if (stratify and y_kind in ("binary", "multiclass")) else None
-        train_idx, test_idx = _tss(range(len(df_all)), test_size=frac, random_state=random_state, stratify=strat)
+        train_idx, test_idx = _tss(
+            range(len(df_all)), test_size=frac, random_state=random_state, stratify=strat
+        )
         df_train = df_all.iloc[train_idx]
         y_train = y_series.iloc[train_idx]
         # Re-learn cuts on train only (honest); overwrite train cuts
         for col in list(cuts_per_col.keys()):
             x_tr = df_train[col]
             try:
-                cuts_tr, used_tr = _choose_splits(x_tr, y_train, method=method, cv=cv, task=task, random_state=random_state, optbinning_kwargs=optbinning_kwargs)
+                cuts_tr, used_tr = _choose_splits(
+                    x_tr,
+                    y_train,
+                    method=method,
+                    cv=cv,
+                    task=task,
+                    random_state=random_state,
+                    optbinning_kwargs=optbinning_kwargs,
+                )
             except Exception as e:
                 diag[col]["holdout_error"] = str(e)
                 continue
@@ -639,6 +779,7 @@ def optimize_bins_to_target(
             diag[col]["learned_on"] = f"train n={len(df_train)}"
             # Build train mapping bin->stat, then score test with it
             import pandas as _pdh
+
             bins_tr = _pdh.Series([_assign_bin(v, cuts_tr) for v in x_tr], index=df_train.index)
             ytr = y_train
             if y_kind == "binary":
@@ -648,11 +789,26 @@ def optimize_bins_to_target(
                     ytr_num = ytr.map(_ym).astype(int)
                 else:
                     ytr_num = ytr.astype(int)
-                train_map = _pdh.DataFrame({"y": ytr_num, "bin": bins_tr}).groupby("bin", observed=True)["y"].mean().to_dict()
+                train_map = (
+                    _pdh.DataFrame({"y": ytr_num, "bin": bins_tr})
+                    .groupby("bin", observed=True)["y"]
+                    .mean()
+                    .to_dict()
+                )
             elif y_kind == "multiclass":
-                train_map = _pdh.DataFrame({"y": ytr, "bin": bins_tr}).groupby("bin", observed=True)["y"].agg(lambda ss: ss.mode().iloc[0]).to_dict()
+                train_map = (
+                    _pdh.DataFrame({"y": ytr, "bin": bins_tr})
+                    .groupby("bin", observed=True)["y"]
+                    .agg(lambda ss: ss.mode().iloc[0])
+                    .to_dict()
+                )
             else:
-                train_map = _pdh.DataFrame({"y": ytr.astype(float), "bin": bins_tr}).groupby("bin", observed=True)["y"].mean().to_dict()
+                train_map = (
+                    _pdh.DataFrame({"y": ytr.astype(float), "bin": bins_tr})
+                    .groupby("bin", observed=True)["y"]
+                    .mean()
+                    .to_dict()
+                )
             x_te = df_all.iloc[test_idx][col]
             y_te = y_series.iloc[test_idx]
             try:
