@@ -164,6 +164,25 @@ credentials. That claim is now true.
   `_require_conn()` helper now raises a `ValueError` that names the cause
   and points at the method form on `DuckJanitor`.
 
+### Added — Type checking, and a CI gate for it
+- The package now **type-checks cleanly** under mypy: 130 errors → 0
+  ("Success: no issues found in 16 source files"). A new `typecheck` CI job
+  enforces it, so the surface cannot silently drift back.
+- `embed_install()` crashed on `huggingface_hub` 1.x: the hub removed the
+  `local_dir_use_symlinks` argument in 1.0, so the call raised `TypeError`.
+  The flag is now sent only when the installed hub accepts it.
+- A dead `from duckdb import SQLType` probe in `bins_opt.py` referenced an
+  attribute DuckDB does not have. Its `ImportError` was swallowed, so it did
+  nothing; it has been removed.
+- The `_fts_index` / `_vss_*` attributes are declared **annotation-only** on
+  `DuckJanitor`. An annotation-only class attribute does not exist at
+  runtime, so `hasattr(dj, "_fts_index")` stays False until an index is
+  actually built. Giving them a default would silently change that
+  contract and break the drop-index behaviour.
+- `DuckJanitor.__exit__` returns `None` rather than `False` — equivalent
+  for exception propagation, and what the type checker expects from a
+  context manager.
+
 ## 0.3.0 - 2026-09-25
 
 ### Added
