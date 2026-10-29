@@ -373,6 +373,38 @@ STRUCT, LIST, and JSON types:
 - [`list_transform()`](docs/api/functions.md#list_transform) / [`list_filter()`](docs/api/functions.md#list_filter) - DuckDB lambdas over LIST columns
 - [`json_extract()`](docs/api/functions.md#json_extract) - JSON pointer extraction
 
+### Set operations and star expressions (v0.4.1)
+
+- [`union()`](docs/api/functions.md#union) - `UNION` / `UNION ALL`, with `by_name=True` for DuckDB's `UNION BY NAME` (columns matched by name, unmatched ones become NULL)
+- [`intersect()`](docs/api/functions.md#intersect) - rows present in both
+- [`except_()`](docs/api/functions.md#except_) - rows in the left side only
+- [`concat_rows()`](docs/api/functions.md#concat_rows) - stack several relations into one
+- [`select_except()`](docs/api/functions.md#select_except) - `COLUMNS(* EXCLUDE (...))` and `COLUMNS(* REPLACE (...))`
+
+```python
+# combine frames whose columns are in different orders
+a.union(b, by_name=True).collect()
+
+# stack many relations
+a.concat_rows([b, c]).collect()
+```
+
+### Remote files and S3 (v0.4.1)
+
+The README previously advertised `from_parquet('s3://bucket/...')` without
+the package actually loading `httpfs` or configuring credentials. It now does.
+
+- [`load_httpfs()`](docs/api/functions.md#load_httpfs) - load DuckDB's `httpfs` extension (ships in the standard wheel; nothing is downloaded implicitly)
+- [`configure_s3()`](docs/api/functions.md#configure_s3) - set S3 credentials, preferring DuckDB's secret manager
+- [`create_s3_secret()`](docs/api/functions.md#create_s3_secret) - create a named S3 secret (in-memory by default)
+- [`read_remote()`](docs/api/functions.md#read_remote) - read a remote Parquet/CSV/JSON/text file
+- [`list_remote()`](docs/api/functions.md#list_remote) - list remote files by glob
+
+Credentials travel as bind parameters, are never printed, and never appear
+in an exception message. They can also be supplied through the environment:
+`PYDUCK_S3_ACCESS_KEY`, `PYDUCK_S3_SECRET_KEY`, `PYDUCK_S3_SESSION_TOKEN`,
+`PYDUCK_S3_REGION`, `PYDUCK_S3_ENDPOINT`.
+
 ### Optional Onager graph analytics
 
 Onager is an optional DuckDB graph-algorithm extension. It adds centrality,

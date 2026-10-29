@@ -21,6 +21,7 @@ from typing import Optional, Union
 import duckdb
 
 from .cleaning_ops import (
+    _require_conn,
     _ensure_columns_exist,
     _quote_id,
     _register_relation,
@@ -238,6 +239,10 @@ def to_struct(
     _ensure_columns_exist(relation.columns, columns)
 
     table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
+
+    table_name = _register_relation(conn, relation)
     old_columns = list(relation.columns)
 
     packed = ", ".join(f"{_quote_id(col)} := {_quote_id(col)}" for col in columns)
@@ -309,6 +314,10 @@ def from_struct(
     """
     _ensure_columns_exist(relation.columns, [struct_column])
     _require_struct(relation, struct_column)
+
+    table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
 
     table_name = _register_relation(conn, relation)
     all_keys = _struct_keys(conn, table_name, struct_column)
@@ -410,6 +419,10 @@ def to_list(
     _ensure_columns_exist(relation.columns, columns)
 
     table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
+
+    table_name = _register_relation(conn, relation)
     old_columns = list(relation.columns)
 
     types = _column_types(relation)
@@ -497,6 +510,10 @@ def from_list(
         raise ValueError("output_column must be a non-empty string")
 
     table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
+
+    table_name = _register_relation(conn, relation)
     old_columns = list(relation.columns)
     kept = [col for col in old_columns if not (drop_source and col == list_column)]
 
@@ -571,6 +588,10 @@ def list_transform(
     _validate_sql_fragment(func, context="List transform lambda")
 
     table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
+
+    table_name = _register_relation(conn, relation)
     old_columns = list(relation.columns)
 
     expr = f"list_transform({_quote_id(list_column)}, {func})"
@@ -635,6 +656,10 @@ def list_filter(
     if not isinstance(func, str):
         raise ValueError("func must be a SQL lambda body string")
     _validate_sql_fragment(func, context="List filter lambda")
+
+    table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
 
     table_name = _register_relation(conn, relation)
     old_columns = list(relation.columns)
@@ -712,6 +737,10 @@ def list_transforms(
     _validate_sql_fragment(func, context="List transform lambda")
 
     table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
+
+    table_name = _register_relation(conn, relation)
     old_columns = list(relation.columns)
 
     expr = f"list_transform({_quote_id(list_column)}, {func})"
@@ -786,6 +815,10 @@ def json_extract(
         raise ValueError("output_column must be a non-empty string")
 
     table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
+
+    table_name = _register_relation(conn, relation)
     old_columns = list(relation.columns)
 
     expr = (
@@ -853,6 +886,10 @@ def unnest(
     _ensure_columns_exist(relation.columns, columns)
     for column in columns:
         _require_list(relation, column)
+
+    table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
 
     table_name = _register_relation(conn, relation)
     old_columns = list(relation.columns)

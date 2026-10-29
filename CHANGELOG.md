@@ -107,7 +107,64 @@ formats and destinations:
   is absent.
 - The public-package contract check now covers every 0.4.0 verb.
 
-## [Unreleased]
+## 0.4.1 - 2026-10-29
+
+Continues the DuckDB-native work from 0.4.0: the remaining verbs that were
+still module-level functions, the set operations, and the remote-file
+support the README had been promising but the package never implemented.
+
+### Added — Chainable text and vector verbs
+`text_normalize`, `build_fts_index`, `drop_fts_index`, `search_text`,
+`keyword_filter`, `embed_column`, `build_vector_index`, `vector_search`, and
+`fuzzy_dedupe` were module-level functions only (`text_normalize(dj, ...)`),
+which broke the chaining contract every other verb follows. Each is now
+also a method on `DuckJanitor`.
+
+- `vector_search()` and `search_text()` accept `return_relation=True` so
+  their results can be chained instead of being forced into a DataFrame.
+- `fuzzy_dedupe()` now stays on the caller's connection rather than
+  silently rebinding the result to the shared in-memory connection.
+
+### Added — Set operations (new `set_ops.py`)
+- `union()`, `intersect()`, `except_()` (alias `except_rows`),
+  `concat_rows()`, and `select_except()`, each also available as a
+  `DuckJanitor` method.
+- `union(..., by_name=True)` uses DuckDB's `UNION BY NAME`, so frames with
+  different column orders combine correctly and unmatched columns become
+  NULL. `UNION ALL BY NAME` is supported by DuckDB 1.5.2 and is used when
+  `all=True`.
+- DuckDB 1.5.2 has no `INTERSECT BY NAME` / `EXCEPT BY NAME`, so those two
+  are emulated by padding both sides to the union of the column sets with
+  typed NULLs. The deviation is documented in the module and in each
+  function's Notes.
+- `select_except()` uses DuckDB's `COLUMNS(* EXCLUDE (...))` and
+  `COLUMNS(* REPLACE (...))` star expressions.
+
+### Added — Remote and S3 support (new `remote.py`)
+The README advertised `from_parquet('s3://bucket/data.parquet')`, but
+nothing in the package loaded DuckDB's `httpfs` extension or configured
+credentials. That claim is now true.
+
+- `load_httpfs()`, `configure_s3()`, `create_s3_secret()`, `read_remote()`,
+  `list_remote()`, and `is_remote_path()`.
+- `httpfs` is registered in `extensions.EXTENSIONS` so the existing loader
+  (and its idempotency cache and error mapping) is reused. It loads
+  offline from the standard DuckDB wheel, so nothing is downloaded
+  implicitly.
+- Credentials travel as **bind parameters**, never interpolated into SQL
+  text, and are never printed or included in an exception message.
+  `configure_s3()` prefers DuckDB's temporary secret manager and falls
+  back to `SET s3_*` statements.
+- `create_s3_secret()` can persist a secret on request; the default is
+  in-memory only, so credentials do not hit disk.
+
+### Fixed
+- Calling a verb without a connection raised
+  `AttributeError: 'NoneType' object has no attribute 'query'`. A shared
+  `_require_conn()` helper now raises a `ValueError` that names the cause
+  and points at the method form on `DuckJanitor`.
+
+## 0.3.0 - 2026-09-25
 
 ### Added
 - **Supervised binning** (`optimize_bins_to_target`, new module
@@ -120,10 +177,6 @@ formats and destinations:
   (`sample_n`) for large tables. Optional install: `pip install
   "pyduck-janitor[binning]"`. Guide: `docs/supervised_binning.md`;
   runnable demo: `examples/optimize_bins_example.py`.
-
-## 0.3.0 - 2026-09-25
-
-### Added
 - **dplyr-style explicit join verbs** (`pyduck_janitor.joins` and methods on
   `DuckJanitor`): `inner_join`, `left_join`, `right_join`, `full_join`,
   `semi_join`, `anti_join`. R/dplyr parity, DuckDB-native SQL.

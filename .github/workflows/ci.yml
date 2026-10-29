@@ -125,14 +125,15 @@ jobs:
           python - <<'PY'
           import importlib.metadata
           from pyduck_janitor import DuckJanitor
+          import pyduck_janitor as pj
 
+          # Verbs that are chainable methods on DuckJanitor.
           required = (
               "from_database", "metric_from_database", "metrics", "profile",
               "metric_cube", "rate_metrics", "cohort_metrics", "freshness",
               "reconcile", "asof_join", "window_mutate", "recursive_cte",
-              # 0.4.0 native output, session, inspection, sampling, nested
               "to_parquet", "to_csv", "to_json", "to_table", "to_view",
-              "to_arrow", "to_polars", "write_relation",
+              "to_arrow", "to_polars",
               "connect", "attach", "detach", "tables", "databases",
               "begin", "commit", "rollback", "close",
               "show", "glimpse", "count",
@@ -140,9 +141,23 @@ jobs:
               "register_python_function", "apply_python_function",
               "to_struct", "from_struct", "to_list", "from_list", "unnest",
               "list_transform", "list_filter", "json_extract",
+              "union", "intersect", "except_", "concat_rows", "select_except",
+              "text_normalize", "build_fts_index", "drop_fts_index",
+              "search_text", "keyword_filter", "embed_column",
+              "build_vector_index", "vector_search", "fuzzy_dedupe",
           )
           missing = [name for name in required if not hasattr(DuckJanitor, name)]
           assert not missing, missing
+
+          # Module-level helpers that are not chainable verbs.
+          required_module = (
+              "write_relation", "load_httpfs", "configure_s3",
+              "create_s3_secret", "read_remote", "list_remote",
+              "is_remote_path",
+          )
+          missing = [name for name in required_module if not hasattr(pj, name)]
+          assert not missing, missing
+
           assert importlib.metadata.version("pyduck-janitor")
           PY
       - name: Upload agent review artifact

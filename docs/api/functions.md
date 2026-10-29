@@ -155,6 +155,53 @@ Complete function-by-function reference for every public method on
 | [`sort_column_value_order`](#sort_column_value_order) | Sort rows by an explicit string ordering of ``column`` (R: ``sort_column_value_order``) | Pyjanitor parity: structural, reshape & aggregation verbs |
 | [`cartesian_product`](#cartesian_product) | Return the cartesian (cross) product of ``self`` and ``other`` | Pyjanitor parity: structural, reshape & aggregation verbs |
 | [`then`](#then) | Compose further verbs in sequence (R: ``then`` / ``DF_to_pandas``) | Pyjanitor parity: structural, reshape & aggregation verbs |
+| [`to_parquet`](#to_parquet) | Write the pipeline to a Parquet file via DuckDB ``COPY ... TO`` | Native output, sessions & inspection (0.4.x) |
+| [`to_csv`](#to_csv) | Write the pipeline to a CSV file via DuckDB ``COPY ... TO`` | Native output, sessions & inspection (0.4.x) |
+| [`to_json`](#to_json) | Write the pipeline to a JSON file via DuckDB ``COPY ... TO`` | Native output, sessions & inspection (0.4.x) |
+| [`to_table`](#to_table) | Materialise the pipeline as a table or view in the DuckDB catalog | Native output, sessions & inspection (0.4.x) |
+| [`to_view`](#to_view) | Materialise the pipeline as a view in the DuckDB catalog | Native output, sessions & inspection (0.4.x) |
+| [`to_arrow`](#to_arrow) | Return the pipeline as an Arrow table | Native output, sessions & inspection (0.4.x) |
+| [`to_polars`](#to_polars) | Return the pipeline as a Polars DataFrame | Native output, sessions & inspection (0.4.x) |
+| [`connect`](#connect) | Open a DuckDB connection and return a session bound to it | Native output, sessions & inspection (0.4.x) |
+| [`attach`](#attach) | Attach another DuckDB database file to this session | Native output, sessions & inspection (0.4.x) |
+| [`detach`](#detach) | Detach a previously attached database | Native output, sessions & inspection (0.4.x) |
+| [`tables`](#tables) | List the tables and views in the current catalog | Native output, sessions & inspection (0.4.x) |
+| [`databases`](#databases) | List the attached databases | Native output, sessions & inspection (0.4.x) |
+| [`begin`](#begin) | Begin an explicit transaction on this session's connection | Native output, sessions & inspection (0.4.x) |
+| [`commit`](#commit) | Commit the current transaction | Native output, sessions & inspection (0.4.x) |
+| [`rollback`](#rollback) | Roll back the current transaction | Native output, sessions & inspection (0.4.x) |
+| [`close`](#close) | Close this session's connection | Native output, sessions & inspection (0.4.x) |
+| [`show`](#show) | Return a DuckDB-style text table of the first *n* rows | Native output, sessions & inspection (0.4.x) |
+| [`glimpse`](#glimpse) | Return the first *n* rows as a pandas DataFrame | Native output, sessions & inspection (0.4.x) |
+| [`count`](#count) | Return the number of rows in the current relation | Native output, sessions & inspection (0.4.x) |
+| [`sample`](#sample) | Randomly sample the pipeline via DuckDB's ``USING SAMPLE`` | Sampling & Python UDFs (0.4.x) |
+| [`sample_rows`](#sample_rows) | Pick *n* rows in random order without a full sort | Sampling & Python UDFs (0.4.x) |
+| [`approx_distinct`](#approx_distinct) | Approximate the number of distinct values in *column* | Sampling & Python UDFs (0.4.x) |
+| [`approx_quantile`](#approx_quantile) | Approximate a quantile of *column* | Sampling & Python UDFs (0.4.x) |
+| [`register_python_function`](#register_python_function) | Register a Python callable as a DuckDB scalar UDF | Sampling & Python UDFs (0.4.x) |
+| [`apply_python_function`](#apply_python_function) | Apply a Python callable to a column inside DuckDB | Sampling & Python UDFs (0.4.x) |
+| [`to_struct`](#to_struct) | Pack one or more columns into a DuckDB STRUCT column | Nested & typed data (0.4.x) |
+| [`from_struct`](#from_struct) | Expand a STRUCT column into separate scalar columns | Nested & typed data (0.4.x) |
+| [`to_list`](#to_list) | Pack one or more columns into a DuckDB LIST column | Nested & typed data (0.4.x) |
+| [`from_list`](#from_list) | Expand a LIST column into one row per element | Nested & typed data (0.4.x) |
+| [`unnest`](#unnest) | Expand one or more LIST columns into rows using ``UNNEST`` | Nested & typed data (0.4.x) |
+| [`list_transform`](#list_transform) | Apply a DuckDB lambda over every element of a LIST column | Nested & typed data (0.4.x) |
+| [`list_filter`](#list_filter) | Filter the elements of a LIST column with a DuckDB lambda | Nested & typed data (0.4.x) |
+| [`json_extract`](#json_extract) | Extract a value from a JSON column | Nested & typed data (0.4.x) |
+| [`union`](#union) | Combine this relation with another using ``UNION`` | Set operations (0.4.1) |
+| [`intersect`](#intersect) | Keep rows present in both this relation and *other* | Set operations (0.4.1) |
+| [`except_`](#except_) | Keep rows in this relation that are not present in *other* | Set operations (0.4.1) |
+| [`concat_rows`](#concat_rows) | Stack this relation with several others into one | Set operations (0.4.1) |
+| [`select_except`](#select_except) | Select every column except the named ones, optionally replacing some | Set operations (0.4.1) |
+| [`text_normalize`](#text_normalize) | Normalize text columns: lowercase, accent strip, whitespace collapse | Text & vector verbs (0.4.1) |
+| [`build_fts_index`](#build_fts_index) | Create a DuckDB full-text-search index over one or more columns | Text & vector verbs (0.4.1) |
+| [`drop_fts_index`](#drop_fts_index) | Drop a full-text-search index | Text & vector verbs (0.4.1) |
+| [`search_text`](#search_text) | BM25-ranked text search over a column | Text & vector verbs (0.4.1) |
+| [`keyword_filter`](#keyword_filter) | Boolean contains filter: keep rows matching any or all phrases | Text & vector verbs (0.4.1) |
+| [`embed_column`](#embed_column) | Compute embeddings for a column and attach them | Text & vector verbs (0.4.1) |
+| [`build_vector_index`](#build_vector_index) | Create an HNSW vector index on an embedding column | Text & vector verbs (0.4.1) |
+| [`vector_search`](#vector_search) | K-nearest-neighbor search against an embedding column | Text & vector verbs (0.4.1) |
+| [`fuzzy_dedupe`](#fuzzy_dedupe) | Find near-duplicate rows by embedding similarity | Text & vector verbs (0.4.1) |
 | [`DropLabel`](#DropLabel) | pyjanitor-parity label-drop sentinel for the select DSL | Module-level helpers |
 | [`patterns`](#patterns) | pyjanitor-parity regex helper | Module-level helpers |
 
@@ -4655,6 +4702,1302 @@ Self for method chaining, after every ``func`` has been applied.
 >>> dj = DuckJanitor.from_pandas(df)
 >>> dj.then(lambda d: d.rename_column('a', 'value')).collect()
 ```
+
+
+
+## Native output, sessions & inspection (0.4.x)
+
+<a id="to_parquet"></a>
+### to_parquet
+
+Write the pipeline to a Parquet file via DuckDB ``COPY ... TO``.
+
+This is the out-of-core exit: the result lands in Parquet without
+ever being materialised in Python.
+
+```python
+to_parquet(self, path: Union[str, pathlib.Path], *, overwrite: bool = False, compression: Optional[str] = None) -> str
+```
+
+**Parameters**
+
+- **path** — str or Path
+  Destination ``.parquet`` path. Parent directories are created.
+- **overwrite** — bool, optional
+  Replace an existing file. Default is False.
+- **compression** — str, optional
+  Compression codec, for example ``'zstd'`` or ``'snappy'``.
+
+**Returns**
+
+str
+The path that was written.
+
+**Example** *(from docstring)*
+
+```python
+>>> dj.clean_names().to_parquet('out/clean.parquet', compression='zstd')
+```
+
+
+
+<a id="to_csv"></a>
+### to_csv
+
+Write the pipeline to a CSV file via DuckDB ``COPY ... TO``.
+
+```python
+to_csv(self, path: Union[str, pathlib.Path], *, overwrite: bool = False, header: bool = True, delimiter: str = ',') -> str
+```
+
+**Parameters**
+
+- **path** — str or Path
+  Destination ``.csv`` path.
+- **overwrite** — bool, optional
+  Replace an existing file. Default is False.
+- **header** — bool, optional
+  Write a header row. Default is True.
+- **delimiter** — str, optional
+  Field delimiter. Default is ``','``.
+
+**Returns**
+
+str
+The path that was written.
+
+_No example available._
+
+
+
+<a id="to_json"></a>
+### to_json
+
+Write the pipeline to a JSON file via DuckDB ``COPY ... TO``.
+
+```python
+to_json(self, path: Union[str, pathlib.Path], *, overwrite: bool = False, newline_delimited: bool = False) -> str
+```
+
+**Parameters**
+
+- **path** — str or Path
+  Destination ``.json`` or ``.jsonl`` path.
+- **overwrite** — bool, optional
+  Replace an existing file. Default is False.
+- **newline_delimited** — bool, optional
+  Write newline-delimited JSON instead of a JSON array.
+
+**Returns**
+
+str
+The path that was written.
+
+_No example available._
+
+
+
+<a id="to_table"></a>
+### to_table
+
+Materialise the pipeline as a table or view in the DuckDB catalog.
+
+```python
+to_table(self, name: str, *, view: bool = False, replace: bool = True) -> str
+```
+
+**Parameters**
+
+- **name** — str
+  Target name. May be ``'schema.table'``.
+- **view** — bool, optional
+  Create a lazy view instead of a stored table. Default is False.
+- **replace** — bool, optional
+  Replace an existing object of the same name. Default is True.
+
+**Returns**
+
+str
+The catalog name that was created.
+
+_No example available._
+
+
+
+<a id="to_view"></a>
+### to_view
+
+Materialise the pipeline as a view in the DuckDB catalog.
+
+```python
+to_view(self, name: str, *, replace: bool = True) -> str
+```
+
+**Parameters**
+
+- **name** — str
+  Target view name.
+- **replace** — bool, optional
+  Replace an existing view of the same name. Default is True.
+
+**Returns**
+
+str
+The catalog name that was created.
+
+_No example available._
+
+
+
+<a id="to_arrow"></a>
+### to_arrow
+
+Return the pipeline as an Arrow table.
+
+```python
+to_arrow(self)
+```
+
+**Returns**
+
+pyarrow.Table
+The result as an Arrow table.
+
+_No example available._
+
+
+
+<a id="to_polars"></a>
+### to_polars
+
+Return the pipeline as a Polars DataFrame.
+
+```python
+to_polars(self)
+```
+
+**Returns**
+
+polars.DataFrame
+The result as a Polars DataFrame.
+
+_No example available._
+
+
+
+<a id="connect"></a>
+### connect
+
+Open a DuckDB connection and return a session bound to it.
+
+This is the entry point for persistent, file-backed work. When
+*path* is ``None`` an in-memory database is used. Unlike the
+classmethods that build a relation, the returned object exposes the
+connection itself so you can create tables, attach other databases,
+and browse the catalog.
+
+```python
+connect(path: Union[str, pathlib.Path, NoneType] = None, *, read_only: bool = False) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **path** — str or Path, optional
+  Path to a DuckDB database file. Created if it does not exist.
+  ``None`` (default) opens an in-memory database.
+- **read_only** — bool, optional
+  Open the database read-only. Default is False.
+
+**Returns**
+
+DuckJanitor
+A session object whose ``.connection`` is the new connection and
+whose relation is an empty ``session`` relation.
+
+**Example** *(from docstring)*
+
+```python
+>>> with DuckJanitor.connect('warehouse.duckdb') as db:
+>>>     dj = db.from_csv('sales.csv')
+>>>     dj.clean_names().to_table('clean_sales')
+```
+
+
+
+<a id="attach"></a>
+### attach
+
+Attach another DuckDB database file to this session.
+
+```python
+attach(self, path: Union[str, pathlib.Path], alias: str, *, read_only: bool = False) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **path** — str or Path
+  Path to the DuckDB database file to attach.
+- **alias** — str
+  Catalog alias the database is exposed under.
+- **read_only** — bool, optional
+  Attach read-only. Default is False.
+
+**Returns**
+
+DuckJanitor
+This object, so the call can stay inside a chain.
+
+**Raises**
+
+ValueError
+If the alias is not a plain identifier.
+
+_No example available._
+
+
+
+<a id="detach"></a>
+### detach
+
+Detach a previously attached database.
+
+```python
+detach(self, alias: str) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **alias** — str
+  The catalog alias to detach.
+
+**Returns**
+
+DuckJanitor
+This object.
+
+_No example available._
+
+
+
+<a id="tables"></a>
+### tables
+
+List the tables and views in the current catalog.
+
+```python
+tables(self) -> list[str]
+```
+
+**Returns**
+
+list of str
+Fully qualified table names.
+
+_No example available._
+
+
+
+<a id="databases"></a>
+### databases
+
+List the attached databases.
+
+```python
+databases(self) -> list[str]
+```
+
+**Returns**
+
+list of str
+Database names.
+
+_No example available._
+
+
+
+<a id="begin"></a>
+### begin
+
+Begin an explicit transaction on this session's connection.
+
+```python
+begin(self) -> 'DuckJanitor'
+```
+
+**Returns**
+
+DuckJanitor
+This object.
+
+_No example available._
+
+
+
+<a id="commit"></a>
+### commit
+
+Commit the current transaction.
+
+```python
+commit(self) -> 'DuckJanitor'
+```
+
+**Returns**
+
+DuckJanitor
+This object.
+
+_No example available._
+
+
+
+<a id="rollback"></a>
+### rollback
+
+Roll back the current transaction.
+
+```python
+rollback(self) -> 'DuckJanitor'
+```
+
+**Returns**
+
+DuckJanitor
+This object.
+
+_No example available._
+
+
+
+<a id="close"></a>
+### close
+
+Close this session's connection.
+
+The shared in-memory connection is never closed by this method,
+because other objects may still depend on it.
+
+```python
+close(self) -> None
+```
+
+_No example available._
+
+
+
+<a id="show"></a>
+### show
+
+Return a DuckDB-style text table of the first *n* rows.
+
+```python
+show(self, n: int = 10, *, max_width: int = 100) -> str
+```
+
+**Parameters**
+
+- **n** — int, optional
+  Number of rows to show. Default is 10.
+- **max_width** — int, optional
+  Maximum column width in characters. Default is 100.
+
+**Returns**
+
+str
+The rendered table.
+
+_No example available._
+
+
+
+<a id="glimpse"></a>
+### glimpse
+
+Return the first *n* rows as a pandas DataFrame.
+
+This is an alias for :meth:`head` with a name that matches the
+tidyverse convention.
+
+```python
+glimpse(self, n: int = 5) -> pandas.DataFrame
+```
+
+**Parameters**
+
+- **n** — int, optional
+  Number of rows. Default is 5.
+
+**Returns**
+
+pd.DataFrame
+The preview rows.
+
+_No example available._
+
+
+
+<a id="count"></a>
+### count
+
+Return the number of rows in the current relation.
+
+```python
+count(self) -> int
+```
+
+**Returns**
+
+int
+The row count.
+
+_No example available._
+
+
+
+## Sampling & Python UDFs (0.4.x)
+
+<a id="sample"></a>
+### sample
+
+Randomly sample the pipeline via DuckDB's ``USING SAMPLE``.
+
+```python
+sample(self, n: Optional[int] = None, frac: Optional[float] = None, *, seed: Optional[int] = None, method: str = 'reservoir') -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **n** — int, optional
+  Number of rows to sample. Mutually exclusive with *frac*.
+  Only the ``'reservoir'`` method supports a row count.
+- **frac** — float, optional
+  Fraction of rows to sample, between 0 and 1. Mutually exclusive
+  with *n*.
+- **seed** — int, optional
+  Non-negative seed for reproducible sampling.
+- **method** — str, optional
+  Sampling method: ``'reservoir'`` (default), ``'bernoulli'``, or
+  ``'system'``.
+
+**Returns**
+
+DuckJanitor
+A new relation holding the sample.
+
+**Example** *(from docstring)*
+
+```python
+>>> dj.sample(n=1000, seed=42).collect()
+```
+
+
+
+<a id="sample_rows"></a>
+### sample_rows
+
+Pick *n* rows in random order without a full sort.
+
+```python
+sample_rows(self, n: int, *, seed: Optional[int] = None) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **n** — int
+  Number of rows to pick.
+- **seed** — int, optional
+  Non-negative seed for a reproducible pick.
+
+**Returns**
+
+DuckJanitor
+A new relation holding *n* rows.
+
+_No example available._
+
+
+
+<a id="approx_distinct"></a>
+### approx_distinct
+
+Approximate the number of distinct values in *column*.
+
+```python
+approx_distinct(self, column: str) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **column** — str
+  Column to inspect.
+
+**Returns**
+
+DuckJanitor
+A single-row relation with the approximate count.
+
+_No example available._
+
+
+
+<a id="approx_quantile"></a>
+### approx_quantile
+
+Approximate a quantile of *column*.
+
+```python
+approx_quantile(self, column: str, quantile: float) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **column** — str
+  Column to inspect.
+- **quantile** — float
+  Target quantile, between 0 and 1.
+
+**Returns**
+
+DuckJanitor
+A single-row relation with the approximate quantile.
+
+_No example available._
+
+
+
+<a id="register_python_function"></a>
+### register_python_function
+
+Register a Python callable as a DuckDB scalar UDF.
+
+The function is registered on this pipeline's connection, so it can
+be used by any later ``sql()`` call or by
+:meth:`apply_python_function`. This keeps user logic inside DuckDB
+instead of forcing a pandas round-trip.
+
+```python
+register_python_function(self, name: str, func: Callable, *, params: Optional[list[str]] = None, return_type: Optional[str] = None) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **name** — str
+  Name to register the function under.
+- **func** — callable
+  The Python callable.
+- **params** — list of str, optional
+  Parameter types, for example ``['VARCHAR']``.
+- **return_type** — str, optional
+  Return type, for example ``'BIGINT'``. Required when the
+  callable has no return annotation.
+
+**Returns**
+
+DuckJanitor
+This object, so the call can stay inside a chain.
+
+_No example available._
+
+
+
+<a id="apply_python_function"></a>
+### apply_python_function
+
+Apply a Python callable to a column inside DuckDB.
+
+```python
+apply_python_function(self, column: str, func: Callable, *, name: Optional[str] = None, params: Optional[list[str]] = None, return_type: Optional[str] = None, output_column: Optional[str] = None) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **column** — str
+  Column to transform.
+- **func** — callable
+  The Python callable.
+- **name** — str, optional
+  Name to register the UDF under. Generated when omitted.
+- **params** — list of str, optional
+  Parameter types for the UDF.
+- **return_type** — str, optional
+  Return type for the UDF.
+- **output_column** — str, optional
+  Name of the resulting column. Defaults to ``'<column>_py'``.
+
+**Returns**
+
+DuckJanitor
+A new relation with the transformed column added.
+
+_No example available._
+
+
+
+## Nested & typed data (0.4.x)
+
+<a id="to_struct"></a>
+### to_struct
+
+Pack one or more columns into a DuckDB STRUCT column.
+
+```python
+to_struct(self, columns: Union[str, list[str]], struct_column: Optional[str] = None, *, drop_source: bool = False) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **columns** — str or list of str
+  Columns to pack. The source column names become the struct keys.
+- **struct_column** — str, optional
+  Name of the resulting STRUCT column. Default is ``'struct'``.
+- **drop_source** — bool, optional
+  Remove the source columns from the output. Default is False.
+
+**Returns**
+
+DuckJanitor
+A new relation with the STRUCT column added.
+
+_No example available._
+
+
+
+<a id="from_struct"></a>
+### from_struct
+
+Expand a STRUCT column into separate scalar columns.
+
+```python
+from_struct(self, struct_column: str, fields: Optional[list[str]] = None, *, prefix: Optional[str] = None, drop_source: bool = False) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **struct_column** — str
+  The STRUCT column to expand.
+- **fields** — list of str, optional
+  Which struct keys to extract. All keys are extracted when omitted.
+- **prefix** — str, optional
+  Prefix added to the output column names.
+- **drop_source** — bool, optional
+  Remove the STRUCT column from the output. Default is False.
+
+**Returns**
+
+DuckJanitor
+A new relation with the struct fields as columns.
+
+_No example available._
+
+
+
+<a id="to_list"></a>
+### to_list
+
+Pack one or more columns into a DuckDB LIST column.
+
+```python
+to_list(self, columns: Union[str, list[str]], list_column: Optional[str] = None, *, drop_source: bool = False) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **columns** — str or list of str
+  Columns to pack into the LIST.
+- **list_column** — str, optional
+  Name of the resulting LIST column. Default is ``'list'``.
+- **drop_source** — bool, optional
+  Remove the source columns from the output. Default is False.
+
+**Returns**
+
+DuckJanitor
+A new relation with the LIST column added.
+
+_No example available._
+
+
+
+<a id="from_list"></a>
+### from_list
+
+Expand a LIST column into one row per element.
+
+```python
+from_list(self, list_column: str, *, index: bool = False, output_column: Optional[str] = None, drop_source: bool = False) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **list_column** — str
+  The LIST column to expand.
+- **index** — bool, optional
+  Also emit a 1-based position column. Default is False.
+- **output_column** — str, optional
+  Name of the position column. Default is ``'pos'``.
+- **drop_source** — bool, optional
+  Remove the LIST column from the output. Default is False.
+
+**Returns**
+
+DuckJanitor
+A new relation with one row per list element.
+
+_No example available._
+
+
+
+<a id="unnest"></a>
+### unnest
+
+Expand one or more LIST columns into rows using ``UNNEST``.
+
+```python
+unnest(self, columns: Union[str, list[str]], *, drop_source: bool = False) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **columns** — str or list of str
+  The LIST columns to expand. Multiple columns are unnested in
+  parallel, zipping their elements.
+- **drop_source** — bool, optional
+  Remove the source LIST columns from the output. Default is False.
+
+**Returns**
+
+DuckJanitor
+A new relation with one row per element.
+
+_No example available._
+
+
+
+<a id="list_transform"></a>
+### list_transform
+
+Apply a DuckDB lambda over every element of a LIST column.
+
+```python
+list_transform(self, list_column: str, func: str, *, output_column: Optional[str] = None) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **list_column** — str
+  The LIST column to transform.
+- **func** — str
+  A DuckDB lambda body, for example ``'x -> x * 2'``.
+- **output_column** — str, optional
+  Name of the resulting column. Defaults to overwriting the source.
+
+**Returns**
+
+DuckJanitor
+A new relation with the transformed LIST column.
+
+_No example available._
+
+
+
+<a id="list_filter"></a>
+### list_filter
+
+Filter the elements of a LIST column with a DuckDB lambda.
+
+```python
+list_filter(self, list_column: str, func: str, *, output_column: Optional[str] = None) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **list_column** — str
+  The LIST column to filter.
+- **func** — str
+  A DuckDB lambda body, for example ``'x -> x > 2'``.
+- **output_column** — str, optional
+  Name of the resulting column. Defaults to overwriting the source.
+
+**Returns**
+
+DuckJanitor
+A new relation with the filtered LIST column.
+
+_No example available._
+
+
+
+<a id="json_extract"></a>
+### json_extract
+
+Extract a value from a JSON column.
+
+```python
+json_extract(self, json_column: str, path: str, *, output_column: Optional[str] = None) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **json_column** — str
+  The JSON column to read.
+- **path** — str
+  A JSON pointer such as ``'$.a.b'`` or a plain key name.
+- **output_column** — str, optional
+  Name of the resulting column. Defaults to overwriting the source.
+
+**Returns**
+
+DuckJanitor
+A new relation with the extracted value.
+
+_No example available._
+
+
+
+## Set operations (0.4.1)
+
+<a id="union"></a>
+### union
+
+Combine this relation with another using ``UNION``.
+
+With ``by_name=True`` the columns are matched by NAME rather than
+position, so differently-ordered frames combine correctly and
+unmatched columns become NULL.
+
+```python
+union(self, other: 'DuckJanitor', *, by_name: bool = False, all: bool = False) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **other** — DuckJanitor
+  The relation to combine with.
+- **by_name** — bool, default False
+  Match columns by name rather than position.
+- **all** — bool, default False
+  Keep duplicates (``UNION ALL``) rather than removing them.
+
+**Returns**
+
+DuckJanitor
+The combined relation.
+
+_No example available._
+
+
+
+<a id="intersect"></a>
+### intersect
+
+Keep rows present in both this relation and *other*.
+
+```python
+intersect(self, other: 'DuckJanitor', *, by_name: bool = False) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **other** — DuckJanitor
+  The relation to intersect with.
+- **by_name** — bool, default False
+  Match columns by name rather than position.
+
+**Returns**
+
+DuckJanitor
+The intersection.
+
+_No example available._
+
+
+
+<a id="except_"></a>
+### except_
+
+Keep rows in this relation that are not present in *other*.
+
+```python
+except_(self, other: 'DuckJanitor', *, by_name: bool = False) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **other** — DuckJanitor
+  The relation to subtract.
+- **by_name** — bool, default False
+  Match columns by name rather than position.
+
+**Returns**
+
+DuckJanitor
+The difference.
+
+_No example available._
+
+
+
+<a id="concat_rows"></a>
+### concat_rows
+
+Stack this relation with several others into one.
+
+```python
+concat_rows(self, others: list['DuckJanitor'], *, by_name: bool = True) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **others** — list of DuckJanitor
+  Relations to stack. All must live on the same connection.
+- **by_name** — bool, default True
+  Match columns by name rather than position.
+
+**Returns**
+
+DuckJanitor
+The stacked relation.
+
+_No example available._
+
+
+
+<a id="select_except"></a>
+### select_except
+
+Select every column except the named ones, optionally replacing some.
+
+Uses DuckDB's ``COLUMNS(* EXCLUDE (...))`` and
+``COLUMNS(* REPLACE (...))`` star expressions.
+
+```python
+select_except(self, columns: Union[str, list[str]], *, replace: Optional[dict[str, str]] = None) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **columns** — str or list of str
+  Columns to exclude.
+- **replace** — dict, optional
+  Mapping of ``{column_name: sql_expression}`` for columns to
+  replace in place.
+
+**Returns**
+
+DuckJanitor
+The projected relation.
+
+_No example available._
+
+
+
+## Text & vector verbs (0.4.1)
+
+<a id="text_normalize"></a>
+### text_normalize
+
+Normalize text columns: lowercase, accent strip, whitespace collapse.
+
+Chainable counterpart to :func:`pyduck_janitor.text_normalize`.
+
+```python
+text_normalize(self, columns: Union[str, list[str]], *, target_columns: Union[str, list[str], NoneType] = None, form: str = 'NFKC', strip_accents: bool = True, lower: bool = True, collapse_whitespace: bool = True, strip: bool = True) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **columns** — str or list of str
+  Source text columns.
+- **target_columns** — str or list of str, optional
+  Output column names. Defaults to overwriting the source columns.
+- **form** — str, default 'NFKC'
+  Unicode normalization form.
+- **strip_accents** — bool, default True
+  Drop combining diacritical marks.
+- **lower** — bool, default True
+  Apply case folding.
+- **collapse_whitespace** — bool, default True
+  Collapse runs of whitespace.
+- **strip** — bool, default True
+  Strip leading and trailing whitespace.
+
+**Returns**
+
+DuckJanitor
+A new relation with the normalized columns.
+
+_No example available._
+
+
+
+<a id="build_fts_index"></a>
+### build_fts_index
+
+Create a DuckDB full-text-search index over one or more columns.
+
+Chainable counterpart to :func:`pyduck_janitor.build_fts_index`.
+
+```python
+build_fts_index(self, columns: Union[str, list[str]], *, stopwords: str = 'english', stemmer: str = 'porter', lower: bool = True, overwrite: bool = True, rowid_col: Optional[str] = None) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **columns** — str or list of str
+  Columns to include in the index.
+- **stopwords** — str, default 'english'
+  Stopword set.
+- **stemmer** — str, default 'porter'
+  Stemmer algorithm.
+- **lower** — bool, default True
+  Lowercase before indexing.
+- **overwrite** — bool, default True
+  Recreate the index if it already exists.
+- **rowid_col** — str, optional
+  Name of the row-id column to create.
+
+**Returns**
+
+DuckJanitor
+This object, with the index recorded for later searches.
+
+_No example available._
+
+
+
+<a id="drop_fts_index"></a>
+### drop_fts_index
+
+Drop a full-text-search index.
+
+Chainable counterpart to :func:`pyduck_janitor.drop_fts_index`.
+
+```python
+drop_fts_index(self, table_name: Optional[str] = None) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **table_name** — str, optional
+  Material table to drop. Defaults to the one recorded on this
+  object by :meth:`build_fts_index`.
+
+**Returns**
+
+DuckJanitor
+This object.
+
+_No example available._
+
+
+
+<a id="search_text"></a>
+### search_text
+
+BM25-ranked text search over a column.
+
+Chainable counterpart to :func:`pyduck_janitor.search_text`. The
+relation must already have an FTS index covering *column*.
+
+```python
+search_text(self, column: str, query: str, *, index_name: Optional[str] = None, top_k: Optional[int] = None, score_col: Optional[str] = 'score', threshold: Optional[float] = None, return_relation: bool = False)
+```
+
+**Parameters**
+
+- **column** — str
+  Column to search.
+- **query** — str
+  Free-text query.
+- **index_name** — str, optional
+  Index to search. Defaults to the one recorded by
+  :meth:`build_fts_index`.
+- **top_k** — int, optional
+  Maximum number of results.
+- **score_col** — str, optional
+  Name of the score column.
+- **threshold** — float, optional
+  Minimum BM25 score to keep.
+- **return_relation** — bool, default False
+  Return a lazy relation instead of a DataFrame, so the result
+  can be chained.
+
+**Returns**
+
+pd.DataFrame or DuckJanitor
+The ranked results.
+
+_No example available._
+
+
+
+<a id="keyword_filter"></a>
+### keyword_filter
+
+Boolean contains filter: keep rows matching any or all phrases.
+
+Chainable counterpart to :func:`pyduck_janitor.keyword_filter`.
+
+```python
+keyword_filter(self, column: str, phrases: Union[str, list[str]], *, mode: str = 'any', case_sensitive: bool = False) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **column** — str
+  Column to filter on.
+- **phrases** — str or list of str
+  Phrases to look for.
+- **mode** — {'any', 'all'}, default 'any'
+  Require any phrase (OR) or all phrases (AND).
+- **case_sensitive** — bool, default False
+  Match case exactly.
+
+**Returns**
+
+DuckJanitor
+A new relation with the matching rows.
+
+_No example available._
+
+
+
+<a id="embed_column"></a>
+### embed_column
+
+Compute embeddings for a column and attach them.
+
+Chainable counterpart to :func:`pyduck_janitor.embed_column`.
+
+```python
+embed_column(self, column: str, *, target_column: str = 'embedding', model: Optional[str] = None, batch_size: int = 64) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **column** — str
+  Text column to embed.
+- **target_column** — str, default 'embedding'
+  Name of the resulting embedding column.
+- **model** — str, optional
+  Model identifier. Defaults to the package default.
+- **batch_size** — int, default 64
+  Encoding batch size.
+
+**Returns**
+
+DuckJanitor
+A new relation with the embedding column added.
+
+_No example available._
+
+
+
+<a id="build_vector_index"></a>
+### build_vector_index
+
+Create an HNSW vector index on an embedding column.
+
+Chainable counterpart to :func:`pyduck_janitor.build_vector_index`.
+
+```python
+build_vector_index(self, embedding_column: str = 'embedding', *, metric: str = 'cosine', index_name: Optional[str] = None, dim: Optional[int] = None) -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **embedding_column** — str, default 'embedding'
+  The embedding column to index.
+- **metric** — {'cosine', 'ip', 'l2sq'}, default 'cosine'
+  Distance metric.
+- **index_name** — str, optional
+  Index identifier.
+- **dim** — int, optional
+  Embedding dimension. Inferred when omitted.
+
+**Returns**
+
+DuckJanitor
+This object, with the index recorded for later searches.
+
+_No example available._
+
+
+
+<a id="vector_search"></a>
+### vector_search
+
+K-nearest-neighbor search against an embedding column.
+
+Chainable counterpart to :func:`pyduck_janitor.vector_search`.
+
+```python
+vector_search(self, query: Union[str, list[float]], embedding_column: str = 'embedding', *, top_k: int = 10, threshold: Optional[float] = None, metric: str = 'cosine', model: Optional[str] = None, score_col: str = '_vss_distance', index_name: Optional[str] = None, return_relation: bool = False)
+```
+
+**Parameters**
+
+- **query** — str or list of float
+  A text query (embedded with *model*) or a pre-computed embedding.
+- **embedding_column** — str, default 'embedding'
+  The embedding column to search.
+- **top_k** — int, default 10
+  Number of nearest neighbors.
+- **threshold** — float, optional
+  Maximum allowed distance.
+- **metric** — {'cosine', 'ip', 'l2sq'}, default 'cosine'
+  Distance metric. Must match the index.
+- **model** — str, optional
+  Model used to embed a text query.
+- **score_col** — str, default '_vss_distance'
+  Output column name for the distance.
+- **index_name** — str, optional
+  Index to search. Defaults to the one recorded by
+  :meth:`build_vector_index`.
+- **return_relation** — bool, default False
+  Return a lazy relation instead of a DataFrame, so the result
+  can be chained.
+
+**Returns**
+
+pd.DataFrame or DuckJanitor
+The nearest neighbors.
+
+_No example available._
+
+
+
+<a id="fuzzy_dedupe"></a>
+### fuzzy_dedupe
+
+Find near-duplicate rows by embedding similarity.
+
+Chainable counterpart to :func:`pyduck_janitor.fuzzy_dedupe`.
+
+```python
+fuzzy_dedupe(self, columns: Union[str, list[str]], *, threshold: float = 0.1, model: Optional[str] = None, embedding_column: str = 'embedding', keep: str = 'first') -> 'DuckJanitor'
+```
+
+**Parameters**
+
+- **columns** — str or list of str
+  Columns whose concatenation defines a row's identity.
+- **threshold** — float, default 0.1
+  Cosine distance above which two rows are *not* duplicates.
+- **model** — str, optional
+  Model identifier.
+- **embedding_column** — str, default 'embedding'
+  Name for the intermediate embedding column.
+- **keep** — {'first', 'group'}, default 'first'
+  Return one row per duplicate group, or every row annotated
+  with a ``_dup_group`` column.
+
+**Returns**
+
+DuckJanitor
+A new relation with the duplicates resolved.
+
+_No example available._
 
 
 

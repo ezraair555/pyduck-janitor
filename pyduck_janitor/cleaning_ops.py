@@ -29,6 +29,40 @@ def _sql_literal(value: Any) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
+def _require_conn(
+    conn: Optional[duckdb.DuckDBPyConnection],
+) -> duckdb.DuckDBPyConnection:
+    """Return *conn*, raising a clear error when it is None.
+
+    Several verbs accept an optional connection and fall back to the
+    caller's connection. When a caller passes nothing at all, the failure
+    used to surface as ``AttributeError: 'NoneType' object has no
+    attribute 'query'``, which says nothing about the cause. This helper
+    turns it into an actionable message.
+
+    Parameters
+    ----------
+    conn : duckdb.DuckDBPyConnection or None
+        The connection to validate.
+
+    Returns
+    -------
+    duckdb.DuckDBPyConnection
+        The non-None connection.
+
+    Raises
+    ------
+    ValueError
+        If *conn* is None.
+    """
+    if conn is None:
+        raise ValueError(
+            "A DuckDB connection is required. Pass the connection that owns "
+            "the relation, or use the method form on DuckJanitor."
+        )
+    return conn
+
+
 def _register_relation(
     conn: Optional[duckdb.DuckDBPyConnection], relation: duckdb.DuckDBPyRelation
 ) -> str:

@@ -106,6 +106,22 @@ from .nested_ops import (
     to_struct,
     unnest,
 )
+from .set_ops import (
+    concat_rows,
+    except_,
+    except_rows,
+    intersect,
+    select_except,
+    union,
+)
+from .remote import (
+    configure_s3,
+    create_s3_secret,
+    is_remote_path,
+    list_remote,
+    load_httpfs,
+    read_remote,
+)
 from .sampling import (
     approx_distinct,
     approx_quantile,
@@ -122,7 +138,7 @@ from .text_ops import (
     text_normalize,
 )
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 __author__ = "EzraAir555"
 __all__ = [
     "DuckJanitor",
@@ -226,6 +242,20 @@ __all__ = __all__ + [
     "approx_quantile",
     "register_python_function",
     "apply_python_function",
+    # Remote / S3 support (0.4.1)
+    "load_httpfs",
+    "configure_s3",
+    "create_s3_secret",
+    "read_remote",
+    "list_remote",
+    "is_remote_path",
+    # Set operations (0.4.1)
+    "union",
+    "intersect",
+    "except_",
+    "except_rows",
+    "concat_rows",
+    "select_except",
     # Nested / typed data verbs (0.4.0)
     "to_struct",
     "from_struct",

@@ -1332,6 +1332,512 @@ class DuckJanitor:
         return DuckJanitor(relation, self._connection)
 
     # =============================================================
+    # Text and vector verbs — chainable wrappers around the
+    # module-level functions in text_ops / embeddings.
+    # =============================================================
+
+    def text_normalize(
+        self,
+        columns: Union[str, list[str]],
+        *,
+        target_columns: Optional[Union[str, list[str]]] = None,
+        form: str = "NFKC",
+        strip_accents: bool = True,
+        lower: bool = True,
+        collapse_whitespace: bool = True,
+        strip: bool = True,
+    ) -> "DuckJanitor":
+        """Normalize text columns: lowercase, accent strip, whitespace collapse.
+
+        Chainable counterpart to :func:`pyduck_janitor.text_normalize`.
+
+        Parameters
+        ----------
+        columns : str or list of str
+            Source text columns.
+        target_columns : str or list of str, optional
+            Output column names. Defaults to overwriting the source columns.
+        form : str, default 'NFKC'
+            Unicode normalization form.
+        strip_accents : bool, default True
+            Drop combining diacritical marks.
+        lower : bool, default True
+            Apply case folding.
+        collapse_whitespace : bool, default True
+            Collapse runs of whitespace.
+        strip : bool, default True
+            Strip leading and trailing whitespace.
+
+        Returns
+        -------
+        DuckJanitor
+            A new relation with the normalized columns.
+        """
+        from .text_ops import text_normalize as _text_normalize
+
+        return _text_normalize(
+            self,
+            columns,
+            target_columns=target_columns,
+            form=form,
+            strip_accents=strip_accents,
+            lower=lower,
+            collapse_whitespace=collapse_whitespace,
+            strip=strip,
+        )
+
+    def build_fts_index(
+        self,
+        columns: Union[str, list[str]],
+        *,
+        stopwords: str = "english",
+        stemmer: str = "porter",
+        lower: bool = True,
+        overwrite: bool = True,
+        rowid_col: Optional[str] = None,
+    ) -> "DuckJanitor":
+        """Create a DuckDB full-text-search index over one or more columns.
+
+        Chainable counterpart to :func:`pyduck_janitor.build_fts_index`.
+
+        Parameters
+        ----------
+        columns : str or list of str
+            Columns to include in the index.
+        stopwords : str, default 'english'
+            Stopword set.
+        stemmer : str, default 'porter'
+            Stemmer algorithm.
+        lower : bool, default True
+            Lowercase before indexing.
+        overwrite : bool, default True
+            Recreate the index if it already exists.
+        rowid_col : str, optional
+            Name of the row-id column to create.
+
+        Returns
+        -------
+        DuckJanitor
+            This object, with the index recorded for later searches.
+        """
+        from .text_ops import build_fts_index as _build_fts_index
+
+        return _build_fts_index(
+            self,
+            columns,
+            stopwords=stopwords,
+            stemmer=stemmer,
+            lower=lower,
+            overwrite=overwrite,
+            rowid_col=rowid_col,
+        )
+
+    def drop_fts_index(self, table_name: Optional[str] = None) -> "DuckJanitor":
+        """Drop a full-text-search index.
+
+        Chainable counterpart to :func:`pyduck_janitor.drop_fts_index`.
+
+        Parameters
+        ----------
+        table_name : str, optional
+            Material table to drop. Defaults to the one recorded on this
+            object by :meth:`build_fts_index`.
+
+        Returns
+        -------
+        DuckJanitor
+            This object.
+        """
+        from .text_ops import drop_fts_index as _drop_fts_index
+
+        return _drop_fts_index(self, table_name)
+
+    def search_text(
+        self,
+        column: str,
+        query: str,
+        *,
+        index_name: Optional[str] = None,
+        top_k: Optional[int] = None,
+        score_col: Optional[str] = "score",
+        threshold: Optional[float] = None,
+        return_relation: bool = False,
+    ):
+        """BM25-ranked text search over a column.
+
+        Chainable counterpart to :func:`pyduck_janitor.search_text`. The
+        relation must already have an FTS index covering *column*.
+
+        Parameters
+        ----------
+        column : str
+            Column to search.
+        query : str
+            Free-text query.
+        index_name : str, optional
+            Index to search. Defaults to the one recorded by
+            :meth:`build_fts_index`.
+        top_k : int, optional
+            Maximum number of results.
+        score_col : str, optional
+            Name of the score column.
+        threshold : float, optional
+            Minimum BM25 score to keep.
+        return_relation : bool, default False
+            Return a lazy relation instead of a DataFrame, so the result
+            can be chained.
+
+        Returns
+        -------
+        pd.DataFrame or DuckJanitor
+            The ranked results.
+        """
+        from .text_ops import search_text as _search_text
+
+        return _search_text(
+            self,
+            column,
+            query,
+            index_name=index_name,
+            top_k=top_k,
+            score_col=score_col,
+            threshold=threshold,
+            return_relation=return_relation,
+        )
+
+    def keyword_filter(
+        self,
+        column: str,
+        phrases: Union[str, list[str]],
+        *,
+        mode: str = "any",
+        case_sensitive: bool = False,
+    ) -> "DuckJanitor":
+        """Boolean contains filter: keep rows matching any or all phrases.
+
+        Chainable counterpart to :func:`pyduck_janitor.keyword_filter`.
+
+        Parameters
+        ----------
+        column : str
+            Column to filter on.
+        phrases : str or list of str
+            Phrases to look for.
+        mode : {'any', 'all'}, default 'any'
+            Require any phrase (OR) or all phrases (AND).
+        case_sensitive : bool, default False
+            Match case exactly.
+
+        Returns
+        -------
+        DuckJanitor
+            A new relation with the matching rows.
+        """
+        from .text_ops import keyword_filter as _keyword_filter
+
+        return _keyword_filter(self, column, phrases, mode=mode, case_sensitive=case_sensitive)
+
+    def embed_column(
+        self,
+        column: str,
+        *,
+        target_column: str = "embedding",
+        model: Optional[str] = None,
+        batch_size: int = 64,
+    ) -> "DuckJanitor":
+        """Compute embeddings for a column and attach them.
+
+        Chainable counterpart to :func:`pyduck_janitor.embed_column`.
+
+        Parameters
+        ----------
+        column : str
+            Text column to embed.
+        target_column : str, default 'embedding'
+            Name of the resulting embedding column.
+        model : str, optional
+            Model identifier. Defaults to the package default.
+        batch_size : int, default 64
+            Encoding batch size.
+
+        Returns
+        -------
+        DuckJanitor
+            A new relation with the embedding column added.
+        """
+        from .embeddings import DEFAULT_EMBED_MODEL, embed_column as _embed_column
+
+        return _embed_column(
+            self,
+            column,
+            target_column=target_column,
+            model=model or DEFAULT_EMBED_MODEL,
+            batch_size=batch_size,
+        )
+
+    def build_vector_index(
+        self,
+        embedding_column: str = "embedding",
+        *,
+        metric: str = "cosine",
+        index_name: Optional[str] = None,
+        dim: Optional[int] = None,
+    ) -> "DuckJanitor":
+        """Create an HNSW vector index on an embedding column.
+
+        Chainable counterpart to :func:`pyduck_janitor.build_vector_index`.
+
+        Parameters
+        ----------
+        embedding_column : str, default 'embedding'
+            The embedding column to index.
+        metric : {'cosine', 'ip', 'l2sq'}, default 'cosine'
+            Distance metric.
+        index_name : str, optional
+            Index identifier.
+        dim : int, optional
+            Embedding dimension. Inferred when omitted.
+
+        Returns
+        -------
+        DuckJanitor
+            This object, with the index recorded for later searches.
+        """
+        from .embeddings import build_vector_index as _build_vector_index
+
+        return _build_vector_index(
+            self, embedding_column, metric=metric, index_name=index_name, dim=dim
+        )
+
+    def vector_search(
+        self,
+        query: Union[str, list[float]],
+        embedding_column: str = "embedding",
+        *,
+        top_k: int = 10,
+        threshold: Optional[float] = None,
+        metric: str = "cosine",
+        model: Optional[str] = None,
+        score_col: str = "_vss_distance",
+        index_name: Optional[str] = None,
+        return_relation: bool = False,
+    ):
+        """K-nearest-neighbor search against an embedding column.
+
+        Chainable counterpart to :func:`pyduck_janitor.vector_search`.
+
+        Parameters
+        ----------
+        query : str or list of float
+            A text query (embedded with *model*) or a pre-computed embedding.
+        embedding_column : str, default 'embedding'
+            The embedding column to search.
+        top_k : int, default 10
+            Number of nearest neighbors.
+        threshold : float, optional
+            Maximum allowed distance.
+        metric : {'cosine', 'ip', 'l2sq'}, default 'cosine'
+            Distance metric. Must match the index.
+        model : str, optional
+            Model used to embed a text query.
+        score_col : str, default '_vss_distance'
+            Output column name for the distance.
+        index_name : str, optional
+            Index to search. Defaults to the one recorded by
+            :meth:`build_vector_index`.
+        return_relation : bool, default False
+            Return a lazy relation instead of a DataFrame, so the result
+            can be chained.
+
+        Returns
+        -------
+        pd.DataFrame or DuckJanitor
+            The nearest neighbors.
+        """
+        from .embeddings import DEFAULT_EMBED_MODEL, vector_search as _vector_search
+
+        return _vector_search(
+            self,
+            query,
+            embedding_column,
+            top_k=top_k,
+            threshold=threshold,
+            metric=metric,
+            model=model or DEFAULT_EMBED_MODEL,
+            score_col=score_col,
+            index_name=index_name,
+            return_relation=return_relation,
+        )
+
+    def fuzzy_dedupe(
+        self,
+        columns: Union[str, list[str]],
+        *,
+        threshold: float = 0.1,
+        model: Optional[str] = None,
+        embedding_column: str = "embedding",
+        keep: str = "first",
+    ) -> "DuckJanitor":
+        """Find near-duplicate rows by embedding similarity.
+
+        Chainable counterpart to :func:`pyduck_janitor.fuzzy_dedupe`.
+
+        Parameters
+        ----------
+        columns : str or list of str
+            Columns whose concatenation defines a row's identity.
+        threshold : float, default 0.1
+            Cosine distance above which two rows are *not* duplicates.
+        model : str, optional
+            Model identifier.
+        embedding_column : str, default 'embedding'
+            Name for the intermediate embedding column.
+        keep : {'first', 'group'}, default 'first'
+            Return one row per duplicate group, or every row annotated
+            with a ``_dup_group`` column.
+
+        Returns
+        -------
+        DuckJanitor
+            A new relation with the duplicates resolved.
+        """
+        from .embeddings import DEFAULT_EMBED_MODEL, fuzzy_dedupe as _fuzzy_dedupe
+
+        return _fuzzy_dedupe(
+            self,
+            columns,
+            threshold=threshold,
+            model=model or DEFAULT_EMBED_MODEL,
+            embedding_column=embedding_column,
+            keep=keep,
+        )
+
+    # =============================================================
+    # Set operations — UNION / INTERSECT / EXCEPT and star expressions.
+    # =============================================================
+
+    def union(
+        self,
+        other: "DuckJanitor",
+        *,
+        by_name: bool = False,
+        all: bool = False,  # noqa: A002 - mirrors the SQL keyword
+    ) -> "DuckJanitor":
+        """Combine this relation with another using ``UNION``.
+
+        With ``by_name=True`` the columns are matched by NAME rather than
+        position, so differently-ordered frames combine correctly and
+        unmatched columns become NULL.
+
+        Parameters
+        ----------
+        other : DuckJanitor
+            The relation to combine with.
+        by_name : bool, default False
+            Match columns by name rather than position.
+        all : bool, default False
+            Keep duplicates (``UNION ALL``) rather than removing them.
+
+        Returns
+        -------
+        DuckJanitor
+            The combined relation.
+        """
+        from .set_ops import union as _union
+
+        relation = _union(self, other, by_name=by_name, all=all, conn=self._connection)
+        return DuckJanitor(relation, self._connection)
+
+    def intersect(self, other: "DuckJanitor", *, by_name: bool = False) -> "DuckJanitor":
+        """Keep rows present in both this relation and *other*.
+
+        Parameters
+        ----------
+        other : DuckJanitor
+            The relation to intersect with.
+        by_name : bool, default False
+            Match columns by name rather than position.
+
+        Returns
+        -------
+        DuckJanitor
+            The intersection.
+        """
+        from .set_ops import intersect as _intersect
+
+        relation = _intersect(self, other, by_name=by_name, conn=self._connection)
+        return DuckJanitor(relation, self._connection)
+
+    def except_(self, other: "DuckJanitor", *, by_name: bool = False) -> "DuckJanitor":
+        """Keep rows in this relation that are not present in *other*.
+
+        Parameters
+        ----------
+        other : DuckJanitor
+            The relation to subtract.
+        by_name : bool, default False
+            Match columns by name rather than position.
+
+        Returns
+        -------
+        DuckJanitor
+            The difference.
+        """
+        from .set_ops import except_ as _except_
+
+        relation = _except_(self, other, by_name=by_name, conn=self._connection)
+        return DuckJanitor(relation, self._connection)
+
+    def concat_rows(self, others: list["DuckJanitor"], *, by_name: bool = True) -> "DuckJanitor":
+        """Stack this relation with several others into one.
+
+        Parameters
+        ----------
+        others : list of DuckJanitor
+            Relations to stack. All must live on the same connection.
+        by_name : bool, default True
+            Match columns by name rather than position.
+
+        Returns
+        -------
+        DuckJanitor
+            The stacked relation.
+        """
+        from .set_ops import concat_rows as _concat_rows
+
+        relation = _concat_rows(self, others, by_name=by_name, conn=self._connection)
+        return DuckJanitor(relation, self._connection)
+
+    def select_except(
+        self,
+        columns: Union[str, list[str]],
+        *,
+        replace: Optional[dict[str, str]] = None,
+    ) -> "DuckJanitor":
+        """Select every column except the named ones, optionally replacing some.
+
+        Uses DuckDB's ``COLUMNS(* EXCLUDE (...))`` and
+        ``COLUMNS(* REPLACE (...))`` star expressions.
+
+        Parameters
+        ----------
+        columns : str or list of str
+            Columns to exclude.
+        replace : dict, optional
+            Mapping of ``{column_name: sql_expression}`` for columns to
+            replace in place.
+
+        Returns
+        -------
+        DuckJanitor
+            The projected relation.
+        """
+        from .set_ops import select_except as _select_except
+
+        relation = _select_except(self, columns, replace=replace, conn=self._connection)
+        return DuckJanitor(relation, self._connection)
+
+    # =============================================================
     # Sampling — DuckDB-native, no full sort.
     # =============================================================
 

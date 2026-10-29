@@ -39,7 +39,12 @@ from typing import Any, Callable, Optional, Union
 
 import duckdb
 
-from .cleaning_ops import _ensure_columns_exist, _quote_id, _register_relation
+from .cleaning_ops import (
+    _ensure_columns_exist,
+    _quote_id,
+    _register_relation,
+    _require_conn,
+)
 
 __all__ = [
     "sample",
@@ -292,6 +297,10 @@ def sample(
     repeatable = f" REPEATABLE ({seed})" if seed is not None else ""
 
     table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
+
+    table_name = _register_relation(conn, relation)
     query = f"SELECT * FROM {table_name} USING SAMPLE {method} ({size_clause}){repeatable}"
 
     return conn.query(query)
@@ -359,6 +368,10 @@ def sample_rows(
     seed = _validate_seed(seed)
 
     table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
+
+    table_name = _register_relation(conn, relation)
     repeatable = f" REPEATABLE ({seed})" if seed is not None else ""
     native_query = (
         f"SELECT * FROM {table_name} USING SAMPLE reservoir ({row_count} ROWS){repeatable}"
@@ -423,6 +436,8 @@ def approx_distinct(
     """
     _ensure_columns_exist(relation.columns, [column])
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
+    table_name = _register_relation(conn, relation)
     query = (
         f"SELECT approx_count_distinct({_quote_id(column)}) AS "
         f"{_quote_id('approx_distinct')} FROM {table_name}"
@@ -484,6 +499,10 @@ def approx_quantile(
     quantile = float(quantile)
     if quantile < 0 or quantile > 1:
         raise ValueError("quantile must be a number between 0 and 1")
+
+    table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
 
     table_name = _register_relation(conn, relation)
     query = (
@@ -682,6 +701,10 @@ def apply_python_function(
         return_type=return_type,
         conn=conn,
     )
+
+    table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
 
     table_name = _register_relation(conn, relation)
     target_column = f"{column}_py"

@@ -553,7 +553,8 @@ def vector_search(
     model: str = DEFAULT_EMBED_MODEL,
     score_col: str = "_vss_distance",
     index_name: Optional[str] = None,
-) -> pd.DataFrame:
+    return_relation: bool = False,
+) -> Union[pd.DataFrame, "DuckJanitor"]:
     """K-nearest-neighbor search against an embedding column.
 
     Parameters
@@ -574,10 +575,13 @@ def vector_search(
         Used to embed text queries.
     score_col : str, default '_vss_distance'
         Output column name for the distance.
+    return_relation : bool, default False
+        When True, return a lazy ``DuckJanitor`` relation instead of a
+        materialized DataFrame, so the result can be chained.
 
     Returns
     -------
-    pd.DataFrame
+    pd.DataFrame or DuckJanitor
         Top-k rows with the distance column appended.
     """
     conn = dj._connection
@@ -613,6 +617,8 @@ def vector_search(
     df = relation.df()
     if threshold is not None:
         df = df[df[score_col] <= threshold].reset_index(drop=True)
+    if return_relation:
+        return DuckJanitor(conn.from_df(df), connection=conn)
     return df
 
 
@@ -653,7 +659,7 @@ def fuzzy_dedupe(
     embeddings = _encode_texts(identity.tolist(), model)
 
     # Pairwise cosine distance via DuckDB.
-    conn = duckdb.connect(":memory:")
+    conn = dj._connection
     rows = pd.DataFrame(
         {
             "__id": range(len(df)),
@@ -694,4 +700,4 @@ def fuzzy_dedupe(
     df["_dup_group"] = [find(i) for i in range(n)]
     if keep == "first":
         df = df.drop_duplicates(subset=["_dup_group"]).reset_index(drop=True)
-    return DuckJanitor.from_pandas(df)
+    return DuckJanitor(conn.from_df(df), connection=conn)
