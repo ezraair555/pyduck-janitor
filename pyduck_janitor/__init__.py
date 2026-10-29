@@ -85,6 +85,51 @@ from .embeddings import (
     vector_search,
 )
 from .extensions import ExtensionNotAvailable
+from .io_ops import (
+    to_arrow,
+    to_csv,
+    to_json,
+    to_parquet,
+    to_polars,
+    to_table,
+    to_view,
+    write_relation,
+)
+from .nested_ops import (
+    from_list,
+    from_struct,
+    json_extract,
+    list_filter,
+    list_transform,
+    list_transforms,
+    to_list,
+    to_struct,
+    unnest,
+)
+from .set_ops import (
+    concat_rows,
+    except_,
+    except_rows,
+    intersect,
+    select_except,
+    union,
+)
+from .remote import (
+    configure_s3,
+    create_s3_secret,
+    is_remote_path,
+    list_remote,
+    load_httpfs,
+    read_remote,
+)
+from .sampling import (
+    approx_distinct,
+    approx_quantile,
+    apply_python_function,
+    register_python_function,
+    sample,
+    sample_rows,
+)
 from .text_ops import (
     build_fts_index,
     drop_fts_index,
@@ -93,7 +138,7 @@ from .text_ops import (
     text_normalize,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.4.1"
 __author__ = "EzraAir555"
 __all__ = [
     "DuckJanitor",
@@ -181,4 +226,44 @@ __all__ = __all__ + [
     "full_join",
     "semi_join",
     "anti_join",
+    # Output suite (0.4.0): write results without going through pandas
+    "write_relation",
+    "to_parquet",
+    "to_csv",
+    "to_json",
+    "to_table",
+    "to_view",
+    "to_arrow",
+    "to_polars",
+    # Sampling + Python UDF registration (0.4.0)
+    "sample",
+    "sample_rows",
+    "approx_distinct",
+    "approx_quantile",
+    "register_python_function",
+    "apply_python_function",
+    # Remote / S3 support (0.4.1)
+    "load_httpfs",
+    "configure_s3",
+    "create_s3_secret",
+    "read_remote",
+    "list_remote",
+    "is_remote_path",
+    # Set operations (0.4.1)
+    "union",
+    "intersect",
+    "except_",
+    "except_rows",
+    "concat_rows",
+    "select_except",
+    # Nested / typed data verbs (0.4.0)
+    "to_struct",
+    "from_struct",
+    "to_list",
+    "from_list",
+    "list_transform",
+    "list_filter",
+    "list_transforms",
+    "json_extract",
+    "unnest",
 ]

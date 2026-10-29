@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import unicodedata
 from collections.abc import Sequence
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import pandas as pd
 
@@ -66,7 +66,7 @@ def text_normalize(
     columns: Union[str, Sequence[str]],
     *,
     target_columns: Optional[Union[str, Sequence[str]]] = None,
-    form: str = "NFKC",
+    form: Any = "NFKC",
     strip_accents: bool = True,
     lower: bool = True,
     collapse_whitespace: bool = True,
@@ -143,7 +143,7 @@ def text_normalize(
     if strip_accents or form != "NFC":
 
         def _normalize_scalar(v: object) -> object:
-            if pd.isna(v):
+            if pd.isna(v):  # type: ignore[call-overload]
                 return v
             normalized = unicodedata.normalize(form, str(v))
             if strip_accents:

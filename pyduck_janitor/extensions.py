@@ -39,6 +39,10 @@ EXTENSIONS: dict[str, tuple[str, str]] = {
     "fts": ("fts", "fts"),
     "vss": ("vss", "vss"),
     "json": ("json", "json"),
+    # httpfs ships inside the standard DuckDB wheel and backs remote
+    # S3/HTTP file access. It has no pip extra because there is nothing
+    # to install beyond DuckDB itself.
+    "httpfs": (None, "httpfs"),  # type: ignore[dict-item]
     "onager": ("graph", "onager"),
     "duck_diff": ("diff", "duck_diff"),
 }

@@ -16,6 +16,7 @@ import duckdb
 import pandas as pd
 
 from .cleaning_ops import (
+    _require_conn,
     _ensure_columns_exist,
     _quote_id,
     _register_relation,
@@ -23,6 +24,7 @@ from .cleaning_ops import (
     _validate_sql_fragment,
 )
 from .duck_janitor import DuckJanitor
+from ._sqlutil import temp_name as _temp_name
 
 # ========== Hybrid Layer (Materialize → Python → Re-wrap) ==========
 
@@ -46,6 +48,7 @@ def drop_duplicate_columns(
         Relation with duplicate columns removed (first occurrence kept).
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     cols = relation.columns
     duplicate_cols = set()
 
@@ -59,7 +62,7 @@ def drop_duplicate_columns(
                 continue
             # Compare columns for differences
             query = f"SELECT COUNT(*) FROM {table_name} WHERE {_quote_id(col1)} IS DISTINCT FROM {_quote_id(col2)} LIMIT 1"
-            diff_count = conn.execute(query).fetchone()[0]
+            diff_count = conn.execute(query).fetchone()[0]  # type: ignore[index]
             if diff_count == 0:
                 duplicate_cols.add(col2)
 
@@ -149,8 +152,8 @@ def join_apply(
     if not isinstance(new_column_name, str) or not new_column_name.strip():
         raise ValueError("new_column_name must be a non-empty string")
 
-    temp_self = f"_self_{id(self._relation)}"
-    temp_other = f"_other_{id(other._relation)}"
+    temp_self = _temp_name("_self")
+    temp_other = _temp_name("_other")
     self._connection.register(temp_self, self._relation)
     try:
         self._connection.register(temp_other, other._relation)
@@ -270,8 +273,8 @@ def conditional_join(
 
     where_clause = " AND ".join(conditions) if conditions else "TRUE"
 
-    temp_self = f"_self_{id(relation)}"
-    temp_other = f"_other_{id(other_relation)}"
+    temp_self = _temp_name("_self")
+    temp_other = _temp_name("_other")
     conn.register(temp_self, relation)
     try:
         conn.register(temp_other, other_relation)
@@ -311,6 +314,7 @@ def get_dupes(
         Relation containing only rows appearing more than once.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
 
     if columns is None:
         columns = relation.columns
@@ -359,6 +363,7 @@ def dropnotnull(
         Relation containing only rows with nulls in the inspected columns.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
 
     if subset is None:
         subset = relation.columns
@@ -409,6 +414,7 @@ def expand_column(
         Relation with one dummy column per unique value.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     _ensure_columns_exist(relation.columns, [column])
 
     if prefix is None:
@@ -472,6 +478,7 @@ def impute(
         Relation with missing values in ``column`` filled.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     old_columns = relation.columns
 
     _ensure_columns_exist(old_columns, [column])
@@ -542,6 +549,7 @@ def jitter(
         Relation with the jittered column appended.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     _ensure_columns_exist(relation.columns, [column])
     if scale < 0:
         raise ValueError("scale must be >= 0")
@@ -587,6 +595,7 @@ def label_encode(
         Relation with one additional encoded column per input column.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
 
     if isinstance(columns, str):
         columns = [columns]
@@ -635,6 +644,7 @@ def find_replace(
         Relation with replaced values in the target column.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     old_columns = relation.columns
 
     _ensure_columns_exist(old_columns, [column])
@@ -685,6 +695,7 @@ def count_cumulative_unique(
         Relation with the cumulative-unique count column appended.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     _ensure_columns_exist(relation.columns, [column])
     col = _quote_id(column)
     dest = _quote_id(dest_column)
@@ -726,6 +737,7 @@ def complete(
         Expanded relation with one row per combination of ``columns`` values.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
 
     if isinstance(columns, str):
         columns = [columns]
@@ -847,6 +859,7 @@ def alias(
         f"{_quote_id(old)} AS {_quote_id(new)}" for old, new in zip(df_cols, new_columns)
     ]
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     query = f"SELECT {', '.join(select_parts)} FROM {table_name}"
     return conn.query(query)
 

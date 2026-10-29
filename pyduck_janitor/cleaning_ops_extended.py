@@ -8,7 +8,9 @@ from typing import Any, Optional, Union
 
 import duckdb
 
+from ._sqlutil import temp_name as _temp_name
 from .cleaning_ops import (
+    _require_conn,
     _ensure_columns_exist,
     _quote_id,
     _register_relation,
@@ -51,6 +53,7 @@ def bin_numeric(
     if not isinstance(target_column, str) or not target_column.strip():
         raise ValueError("target_column must be a non-empty string")
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     _ensure_columns_exist(relation.columns, [column])
     col = _quote_id(column)
     tgt = _quote_id(target_column)
@@ -126,6 +129,7 @@ def change_type(
         Relation with column cast to dtype.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     old_columns = relation.columns
 
     _ensure_columns_exist(old_columns, [column])
@@ -173,6 +177,7 @@ def concatenate_columns(
         Relation with concatenated column added.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     if not columns:
         raise ValueError("columns must contain at least one column")
     _ensure_columns_exist(relation.columns, columns)
@@ -219,6 +224,7 @@ def deconcatenate_column(
         Relation with split columns replacing the source column.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     old_columns = relation.columns
 
     _ensure_columns_exist(old_columns, [column])
@@ -257,12 +263,13 @@ def drop_constant_columns(
         Relation with constant columns removed.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     old_columns = relation.columns
 
     non_constant_cols = []
     for col in old_columns:
         query = f"SELECT COUNT(DISTINCT {_quote_id(col)}) FROM {table_name}"
-        unique_count = conn.execute(query).fetchone()[0]
+        unique_count = conn.execute(query).fetchone()[0]  # type: ignore[index]
         if unique_count > 1:
             non_constant_cols.append(col)
 
@@ -307,6 +314,7 @@ def fill(
         Relation with nulls in column filled.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     old_columns = relation.columns
 
     _ensure_columns_exist(old_columns, [column])
@@ -326,7 +334,7 @@ def fill(
             partition = ""
 
         # Use a CTE to generate row index for ordering to avoid parser error on nested window functions
-        numbered_table = f"temp_numbered_{id(relation)}"
+        numbered_table = _temp_name("temp_numbered")
 
         if direction == "forward":
             fill_expr = (
@@ -384,6 +392,7 @@ def fill_empty(
         Relation with empty strings replaced.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     old_columns = relation.columns
 
     if column not in old_columns:
@@ -441,6 +450,7 @@ def flag_nulls(
         Relation with null-flag columns added.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     old_columns = relation.columns
 
     if columns is None:
@@ -493,6 +503,7 @@ def limit_column_characters(
         Relation with column truncated to max_chars.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     old_columns = relation.columns
 
     if column not in old_columns:
@@ -553,6 +564,7 @@ def min_max_scale(
     if not isinstance(target_column, str) or not target_column.strip():
         raise ValueError("target_column must be a non-empty string")
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     _ensure_columns_exist(relation.columns, [column])
     col = _quote_id(column)
     tgt = _quote_id(target_column)
@@ -596,6 +608,7 @@ def groupby_agg(
         Aggregated relation with one row per group.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
 
     if isinstance(by, str):
         by = [by]
@@ -654,6 +667,7 @@ def groupby_topk(
         Relation containing the top k rows per group.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
 
     if isinstance(by, str):
         by = [by]
@@ -706,6 +720,7 @@ def case_when(
         Relation with the new conditional column added.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
 
     case_parts = []
     if not conditions:
@@ -755,6 +770,7 @@ def currency_column_to_numeric(
         Relation with currency column converted to numeric.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     old_columns = relation.columns
 
     _ensure_columns_exist(old_columns, [column])
@@ -804,6 +820,7 @@ def convert_date(
         Relation with column converted to DATE.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     old_columns = relation.columns
 
     _ensure_columns_exist(old_columns, [column])
@@ -860,6 +877,7 @@ def pivot_wider(
     if not isinstance(value_col, str) or not value_col.strip():
         raise ValueError("value_col must be a non-empty string")
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
 
     if isinstance(id_cols, str):
         id_cols = [id_cols]
@@ -918,6 +936,7 @@ def pivot_longer(
     if not isinstance(values_to, str) or not values_to.strip():
         raise ValueError("values_to must be a non-empty string")
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
 
     if isinstance(cols, str):
         cols = [cols]
@@ -980,6 +999,7 @@ def truncate_datetime(
     ):
         raise ValueError("target_column must be a non-empty string or None")
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     old_columns = relation.columns
     _ensure_columns_exist(old_columns, [column])
 

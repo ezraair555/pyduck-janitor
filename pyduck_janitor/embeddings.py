@@ -35,7 +35,7 @@ import shutil
 import threading
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import duckdb
 import pandas as pd
@@ -159,7 +159,7 @@ def _bundled_model_path(model: str) -> Optional[Path]:
         pkg = importlib.import_module("pyduck_janitor_embeddings")
     except ImportError:
         return None
-    pkg_path = Path(pkg.__file__).resolve().parent
+    pkg_path = Path(str(pkg.__file__)).resolve().parent
     candidate = pkg_path / "data" / "embeddings" / _slugify(_canonical_model_id(model))
     if candidate.exists() and (candidate / "config.json").exists():
         return candidate
@@ -243,6 +243,23 @@ def embed_install(
         )
 
 
+def _supports_local_dir_use_symlinks() -> bool:
+    """Return True when the installed huggingface_hub accepts the flag.
+
+    ``local_dir_use_symlinks`` was removed in huggingface_hub 1.0, where
+    ``local_dir`` always materialises real files. Sending the argument to a
+    1.x hub raises TypeError.
+    """
+    try:
+        import inspect
+
+        from huggingface_hub import snapshot_download
+
+        return "local_dir_use_symlinks" in inspect.signature(snapshot_download).parameters
+    except Exception:  # pragma: no cover - depends on the installed hub
+        return False
+
+
 def _install_from_hf(spec: str) -> Path:
     """Download a model from HuggingFace Hub into the cache."""
     try:
@@ -263,12 +280,14 @@ def _install_from_hf(spec: str) -> Path:
 
     target = _model_dir(spec)
     try:
-        snapshot_download(
-            repo_id=repo_id,
-            revision=revision,
-            local_dir=str(target),
-            local_dir_use_symlinks=False,
-            allow_patterns=[
+        # ``local_dir_use_symlinks`` was removed in huggingface_hub 1.x
+        # (the local_dir copy is always real files now). Passing it raises
+        # TypeError on 1.x, so it is only sent to 0.x hubs.
+        download_kwargs: dict[str, Any] = {
+            "repo_id": repo_id,
+            "revision": revision,
+            "local_dir": str(target),
+            "allow_patterns": [
                 "*.json",
                 "*.txt",
                 "*.safetensors",
@@ -278,7 +297,10 @@ def _install_from_hf(spec: str) -> Path:
                 "merges.txt",
                 "special_tokens_map.json",
             ],
-        )
+        }
+        if _supports_local_dir_use_symlinks():
+            download_kwargs["local_dir_use_symlinks"] = False
+        snapshot_download(**download_kwargs)  # type: ignore[call-overload]
     except Exception as exc:
         raise EmbeddingsNotAvailable(
             spec,
@@ -319,7 +341,7 @@ def embed_list_installed() -> pd.DataFrame:
             {
                 "model": entry.name.replace("__", "/").replace("_at_", "@"),
                 "path": str(entry),
-                "size_bytes": total,
+                "size_bytes": int(total),
                 "size_human": _human_size(total),
                 "has_config": (entry / "config.json").exists(),
                 "has_weights": (entry / "model.safetensors").exists()
@@ -329,12 +351,13 @@ def embed_list_installed() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _human_size(n: int) -> str:
+def _human_size(n: float) -> str:
+    size = float(n)
     for unit in ("B", "KB", "MB", "GB"):
-        if n < 1024:
-            return f"{n:.1f} {unit}"
-        n /= 1024
-    return f"{n:.1f} TB"
+        if size < 1024:
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
 
 
 def embed_remove(model: str) -> bool:
@@ -511,7 +534,7 @@ def build_vector_index(
     if dim is None:
         dim = conn.execute(
             f"SELECT length({dj._quote(embedding_column)}) FROM {table_name} LIMIT 1"
-        ).fetchone()[0]
+        ).fetchone()[0]  # type: ignore[index]
     if dim is None:
         raise ValueError(
             f"Cannot infer embedding dimension from column "
@@ -553,7 +576,8 @@ def vector_search(
     model: str = DEFAULT_EMBED_MODEL,
     score_col: str = "_vss_distance",
     index_name: Optional[str] = None,
-) -> pd.DataFrame:
+    return_relation: bool = False,
+) -> Union[pd.DataFrame, "DuckJanitor"]:
     """K-nearest-neighbor search against an embedding column.
 
     Parameters
@@ -574,10 +598,13 @@ def vector_search(
         Used to embed text queries.
     score_col : str, default '_vss_distance'
         Output column name for the distance.
+    return_relation : bool, default False
+        When True, return a lazy ``DuckJanitor`` relation instead of a
+        materialized DataFrame, so the result can be chained.
 
     Returns
     -------
-    pd.DataFrame
+    pd.DataFrame or DuckJanitor
         Top-k rows with the distance column appended.
     """
     conn = dj._connection
@@ -613,6 +640,8 @@ def vector_search(
     df = relation.df()
     if threshold is not None:
         df = df[df[score_col] <= threshold].reset_index(drop=True)
+    if return_relation:
+        return DuckJanitor(conn.from_df(df), connection=conn)
     return df
 
 
@@ -653,7 +682,7 @@ def fuzzy_dedupe(
     embeddings = _encode_texts(identity.tolist(), model)
 
     # Pairwise cosine distance via DuckDB.
-    conn = duckdb.connect(":memory:")
+    conn = dj._connection
     rows = pd.DataFrame(
         {
             "__id": range(len(df)),
@@ -694,4 +723,4 @@ def fuzzy_dedupe(
     df["_dup_group"] = [find(i) for i in range(n)]
     if keep == "first":
         df = df.drop_duplicates(subset=["_dup_group"]).reset_index(drop=True)
-    return DuckJanitor.from_pandas(df)
+    return DuckJanitor(conn.from_df(df), connection=conn)

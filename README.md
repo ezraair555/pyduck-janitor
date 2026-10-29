@@ -283,10 +283,127 @@ These are the only truly *new* methods (no pyjanitor counterpart) — they exist
 - [`freshness()`](docs/api/functions.md#freshness) - Report row count, latest timestamp, age, and staleness
 - [`reconcile()`](docs/api/functions.md#reconcile) - Compare key coverage between two relations
 - [`metric_from_database()`](docs/api/functions.md#metric_from_database) - Aggregate at the source database before transfer
-- [`sql()`](docs/api/functions.md#sql) - Escape hatch: raw SQL against the current relation (use `self` as the table name)
-- [`explain()`](docs/api/functions.md#explain) - EXPLAIN plan for the current pipeline
-- [`collect()`](docs/api/functions.md#collect) / [`head()`](docs/api/functions.md#head) - Materialize to pandas / preview rows
+- [`sql()`](docs/api/functions.md#sql) - Escape hatch: raw SQL against the current relation (use `self` as the table name). Supports `$name` parameter binding
+- [`explain()`](docs/api/functions.md#explain) - EXPLAIN plan for the current pipeline (`analyze=True` for runtime stats)
+- [`collect()`](docs/api/functions.md#collect) / [`head()`](docs/api/functions.md#head) / [`glimpse()`](docs/api/functions.md#glimpse) - Materialize to pandas / preview rows
 - [`get_shared_connection()`](docs/api/functions.md#get_shared_connection) - access to the underlying DuckDB connection
+
+### Native output and write-back (v0.4.0)
+
+Before v0.4.0 the only way out of a pipeline was `collect()`, which pulled the
+whole result into pandas. Now results can land directly in DuckDB-native
+formats and destinations — no Python objects in the middle:
+
+- [`to_parquet()`](docs/api/functions.md#to_parquet) - Write to Parquet via DuckDB `COPY ... TO`
+- [`to_csv()`](docs/api/functions.md#to_csv) - Write to CSV
+- [`to_json()`](docs/api/functions.md#to_json) - Write to JSON or newline-delimited JSON
+- [`to_table()`](docs/api/functions.md#to_table) / [`to_view()`](docs/api/functions.md#to_view) - Materialize as a catalog table or view
+- [`to_arrow()`](docs/api/functions.md#to_arrow) / [`to_polars()`](docs/api/functions.md#to_polars) - Zero-copy Arrow / Polars
+- [`write_relation()`](docs/api/functions.md#write_relation) - The generic `COPY ... TO` escape hatch
+
+```python
+result = (
+    df
+    .clean_names()
+    .dropna(subset=['company2'])
+    .to_parquet('out/clean.parquet', compression='zstd')
+)
+```
+
+### Sessions, persistence, and catalog (v0.4.0)
+
+[`DuckJanitor.connect()`](docs/api/functions.md#connect) opens a file-backed
+DuckDB database and returns a session object. The session owns its
+connection, so you can create tables, attach other databases, browse the
+catalog, and run transactions:
+
+```python
+from pyduck_janitor import DuckJanitor
+
+with DuckJanitor.connect('warehouse.duckdb') as db:
+    DuckJanitor.from_csv('sales.csv', connection=db.connection) \
+        .clean_names() \
+        .to_table('clean_sales')
+    print(db.tables())      # catalog contents
+    print(db.databases())   # attached databases
+```
+
+Other session verbs: [`attach()`](docs/api/functions.md#attach),
+[`detach()`](docs/api/functions.md#detach),
+[`tables()`](docs/api/functions.md#tables),
+[`databases()`](docs/api/functions.md#databases),
+[`begin()`](docs/api/functions.md#begin),
+[`commit()`](docs/api/functions.md#commit),
+[`rollback()`](docs/api/functions.md#rollback),
+[`close()`](docs/api/functions.md#close).
+
+### Inspection and diagnostics (v0.4.0)
+
+- `.columns`, `.dtypes`, `.shape`, `.count()` — cheap metadata without materializing
+- `.relation`, `.connection` — public access to the underlying DuckDB objects
+- [`show()`](docs/api/functions.md#show) — DuckDB-style box table
+- `_repr_html_` — rich schema + preview in Jupyter
+- [`profile()`](docs/api/functions.md#profile) — now with mean, stddev, quantiles, and top-values
+
+```python
+profile = df.profile(quantiles=[0.5, 0.95], top_n=3).collect()
+```
+
+### Sampling and Python UDFs (v0.4.0)
+
+- [`sample()`](docs/api/functions.md#sample) / [`sample_rows()`](docs/api/functions.md#sample_rows) - `USING SAMPLE`, no full sort
+- [`approx_distinct()`](docs/api/functions.md#approx_distinct) / [`approx_quantile()`](docs/api/functions.md#approx_quantile)
+- [`register_python_function()`](docs/api/functions.md#register_python_function) - register a Python callable as a DuckDB scalar UDF
+- [`apply_python_function()`](docs/api/functions.md#apply_python_function) - apply a Python callable to a column *inside* DuckDB
+
+```python
+df.register_python_function(
+    'normalize', lambda s: s.strip().lower(), params=['VARCHAR'], return_type='VARCHAR'
+).apply_python_function('name', lambda s: s.strip().lower())
+```
+
+### Nested and typed data (v0.4.0)
+
+Messy real-world data is nested. These verbs work with DuckDB's native
+STRUCT, LIST, and JSON types:
+
+- [`to_struct()`](docs/api/functions.md#to_struct) / [`from_struct()`](docs/api/functions.md#from_struct)
+- [`to_list()`](docs/api/functions.md#to_list) / [`from_list()`](docs/api/functions.md#from_list)
+- [`unnest()`](docs/api/functions.md#unnest)
+- [`list_transform()`](docs/api/functions.md#list_transform) / [`list_filter()`](docs/api/functions.md#list_filter) - DuckDB lambdas over LIST columns
+- [`json_extract()`](docs/api/functions.md#json_extract) - JSON pointer extraction
+
+### Set operations and star expressions (v0.4.1)
+
+- [`union()`](docs/api/functions.md#union) - `UNION` / `UNION ALL`, with `by_name=True` for DuckDB's `UNION BY NAME` (columns matched by name, unmatched ones become NULL)
+- [`intersect()`](docs/api/functions.md#intersect) - rows present in both
+- [`except_()`](docs/api/functions.md#except_) - rows in the left side only
+- [`concat_rows()`](docs/api/functions.md#concat_rows) - stack several relations into one
+- [`select_except()`](docs/api/functions.md#select_except) - `COLUMNS(* EXCLUDE (...))` and `COLUMNS(* REPLACE (...))`
+
+```python
+# combine frames whose columns are in different orders
+a.union(b, by_name=True).collect()
+
+# stack many relations
+a.concat_rows([b, c]).collect()
+```
+
+### Remote files and S3 (v0.4.1)
+
+The README previously advertised `from_parquet('s3://bucket/...')` without
+the package actually loading `httpfs` or configuring credentials. It now does.
+
+- [`load_httpfs()`](docs/api/functions.md#load_httpfs) - load DuckDB's `httpfs` extension (ships in the standard wheel; nothing is downloaded implicitly)
+- [`configure_s3()`](docs/api/functions.md#configure_s3) - set S3 credentials, preferring DuckDB's secret manager
+- [`create_s3_secret()`](docs/api/functions.md#create_s3_secret) - create a named S3 secret (in-memory by default)
+- [`read_remote()`](docs/api/functions.md#read_remote) - read a remote Parquet/CSV/JSON/text file
+- [`list_remote()`](docs/api/functions.md#list_remote) - list remote files by glob
+
+Credentials travel as bind parameters, are never printed, and never appear
+in an exception message. They can also be supplied through the environment:
+`PYDUCK_S3_ACCESS_KEY`, `PYDUCK_S3_SECRET_KEY`, `PYDUCK_S3_SESSION_TOKEN`,
+`PYDUCK_S3_REGION`, `PYDUCK_S3_ENDPOINT`.
 
 ### Optional Onager graph analytics
 

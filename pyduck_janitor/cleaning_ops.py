@@ -10,6 +10,7 @@ from collections.abc import Iterable
 from typing import Any, Callable, Optional, Union
 
 import duckdb
+from ._sqlutil import temp_name as _temp_name
 
 
 def _quote_id(name: str) -> str:
@@ -28,6 +29,40 @@ def _sql_literal(value: Any) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
+def _require_conn(
+    conn: Optional[duckdb.DuckDBPyConnection],
+) -> duckdb.DuckDBPyConnection:
+    """Return *conn*, raising a clear error when it is None.
+
+    Several verbs accept an optional connection and fall back to the
+    caller's connection. When a caller passes nothing at all, the failure
+    used to surface as ``AttributeError: 'NoneType' object has no
+    attribute 'query'``, which says nothing about the cause. This helper
+    turns it into an actionable message.
+
+    Parameters
+    ----------
+    conn : duckdb.DuckDBPyConnection or None
+        The connection to validate.
+
+    Returns
+    -------
+    duckdb.DuckDBPyConnection
+        The non-None connection.
+
+    Raises
+    ------
+    ValueError
+        If *conn* is None.
+    """
+    if conn is None:
+        raise ValueError(
+            "A DuckDB connection is required. Pass the connection that owns "
+            "the relation, or use the method form on DuckJanitor."
+        )
+    return conn
+
+
 def _register_relation(
     conn: Optional[duckdb.DuckDBPyConnection], relation: duckdb.DuckDBPyRelation
 ) -> str:
@@ -36,9 +71,41 @@ def _register_relation(
         raise ValueError(
             "A DuckDB connection is required. Pass the connection that owns the relation."
         )
-    table_name = f"_temp_{id(relation)}"
+    table_name = _temp_name("_temp")
     conn.register(table_name, relation)
     return table_name
+
+
+def _references_known_column(fragment: str, columns: Iterable[str]) -> bool:
+    """Return True when *fragment* appears to reference one of *columns*.
+
+    Used to decide whether a string argument was intended as a SQL
+    expression or as a plain literal. An expression that names a real
+    column is unambiguous, so a failure to bind it is a user error that
+    should be raised rather than silently downgraded to a literal.
+
+    Parameters
+    ----------
+    fragment : str
+        The candidate SQL fragment.
+    columns : iterable of str
+        The column names available in the relation.
+
+    Returns
+    -------
+    bool
+        True when at least one known column name appears as a word in the
+        fragment.
+    """
+    available = [str(column) for column in columns]
+    if not available:
+        return False
+    pattern = (
+        r"\b(?:"
+        + "|".join(re.escape(name) for name in sorted(available, key=len, reverse=True))
+        + r")\b"
+    )
+    return bool(re.search(pattern, fragment))
 
 
 def _ensure_columns_exist(
@@ -141,7 +208,7 @@ def clean_names(
         raise ValueError("case_type must be one of: 'lower', 'upper', 'original'")
     old_columns = relation.columns
 
-    new_columns = []
+    new_columns: list[tuple[str, str]] = []
     for col in old_columns:
         new_name = col
 
@@ -192,6 +259,7 @@ def clean_names(
     # Build SELECT statement with renamed columns
     select_parts = [f"{_quote_id(old)} AS {_quote_id(new)}" for old, new in new_columns]
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     query = f"SELECT {', '.join(select_parts)} FROM {table_name}"
 
     return conn.query(query)
@@ -233,6 +301,7 @@ def remove_columns(
 
     select_parts = [_quote_id(col) for col in keep_columns]
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     query = f"SELECT {', '.join(select_parts)} FROM {table_name}"
 
     return conn.query(query)
@@ -271,24 +340,41 @@ def add_column(
     if isinstance(values, str):
         # Could be a SQL expression, a column name, or a literal string.
         table_name = _register_relation(conn, relation)
+        conn = _require_conn(conn)
         # Try executing as SQL expression/column first.
         # Validate the fragment only when we attempt SQL interpretation.
         try:
             _validate_sql_fragment(values, context="Column expression")
-            query = f"SELECT *, ({values}) AS {_quote_id(column_name)} FROM {table_name}"
+        except ValueError:
+            # The fragment is not a permitted SQL expression (it contains a
+            # semicolon, a comment, or a statement keyword). Treat it as a
+            # plain string literal.
+            literal_val = _sql_literal(values)
+            query = f"SELECT *, {literal_val} AS {_quote_id(column_name)} FROM {table_name}"
+            return conn.query(query)
+
+        # The fragment passed validation. If it names one of the relation's
+        # own columns it was clearly meant as a SQL expression, so a binder
+        # error is a user error and must be raised -- never silently
+        # downgraded to a string literal.
+        looks_like_expression = _references_known_column(values, relation.columns)
+        try:
             # Test query execution (using LIMIT 0 to avoid computing rows)
             conn.execute(f"SELECT ({values}) FROM {table_name} LIMIT 0")
-            return conn.query(query)
-        except ValueError:
-            # Validation rejected the fragment — treat as string literal.
+        except Exception as exc:
+            if looks_like_expression:
+                raise ValueError(
+                    f"add_column(): could not evaluate the SQL expression {values!r} "
+                    f"against the relation. Available columns: {list(relation.columns)}. "
+                    "Pass as_literal=True to store the value as a string instead."
+                ) from exc
+            # Not column-referencing text: treat it as a literal string.
             literal_val = _sql_literal(values)
             query = f"SELECT *, {literal_val} AS {_quote_id(column_name)} FROM {table_name}"
             return conn.query(query)
-        except Exception:
-            # If binder/parsing exception (like missing column reference), treat as string literal
-            literal_val = _sql_literal(values)
-            query = f"SELECT *, {literal_val} AS {_quote_id(column_name)} FROM {table_name}"
-            return conn.query(query)
+
+        query = f"SELECT *, ({values}) AS {_quote_id(column_name)} FROM {table_name}"
+        return conn.query(query)
     elif isinstance(values, list):
         # Create from list - need to use a different approach
         # For simplicity, convert to pandas, add column, convert back
@@ -299,11 +385,12 @@ def add_column(
             else:
                 values = values + [None] * (len(df) - len(values))
         df[column_name] = values[: len(df)]
-        return conn.from_df(df)
+        return conn.from_df(df)  # type: ignore[union-attr]
     else:
         # Scalar value
         literal_val = _sql_literal(values)
         table_name = _register_relation(conn, relation)
+        conn = _require_conn(conn)
         query = f"SELECT *, {literal_val} AS {_quote_id(column_name)} FROM {table_name}"
         return conn.query(query)
 
@@ -347,6 +434,8 @@ def rename_column(
             select_parts.append(_quote_id(col))
 
     table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
     query = f"SELECT {', '.join(select_parts)} FROM {table_name}"
 
     return conn.query(query)
@@ -376,6 +465,7 @@ def dropna(
         Relation with missing values removed.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
 
     if subset is None:
         subset = relation.columns
@@ -418,6 +508,7 @@ def remove_empty(
         Relation with empty rows/columns removed.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     old_columns = relation.columns
     non_empty_cols = []
 
@@ -428,7 +519,7 @@ def remove_empty(
             f"WHERE {_quote_id(col)} IS NOT NULL "
             f"AND CAST({_quote_id(col)} AS VARCHAR) != ''"
         )
-        result = conn.execute(query).fetchone()[0]
+        result = conn.execute(query).fetchone()[0]  # type: ignore[index]
         if result > 0:
             non_empty_cols.append(col)
 
@@ -482,20 +573,29 @@ def filter_column(
                 "Callable criteria must return a mask with the same row count as the input relation."
             )
         df = df[mask]
-        return conn.from_df(df)
+        return conn.from_df(df)  # type: ignore[union-attr]
 
     table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
     if isinstance(criteria, str):
         _validate_sql_fragment(criteria, context="Filter criteria")
         # Try executing as raw SQL WHERE clause first
+        looks_like_expression = _references_known_column(criteria, relation.columns)
         try:
             query_test = f"SELECT 1 FROM {table_name} WHERE {criteria} LIMIT 0"
             conn.execute(query_test)
             # Valid raw SQL WHERE clause
             query = f"SELECT * FROM {table_name} WHERE {criteria}"
             return conn.query(query)
-        except Exception:
-            pass
+        except Exception as exc:
+            if looks_like_expression:
+                raise ValueError(
+                    f"filter_column(): could not evaluate the criteria {criteria!r} "
+                    f"against the relation. Available columns: {list(relation.columns)}. "
+                    "Pass a literal value to filter by equality instead."
+                ) from exc
+            # Not column-referencing text: treat it as a literal value.
 
     # Fallback: treat criteria as a literal value and compare for equality
     literal_val = _sql_literal(criteria)
@@ -527,6 +627,7 @@ def coalesce(
         Relation with coalesced column.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     if not columns:
         raise ValueError("columns must contain at least one column")
     _ensure_columns_exist(relation.columns, columns)
@@ -571,6 +672,7 @@ def encode_categorical(
         Relation with encoded column.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     _ensure_columns_exist(relation.columns, [column])
 
     if col_name is None:
@@ -612,6 +714,7 @@ def get_dummies(
         Relation with dummy columns.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
 
     if isinstance(columns, str):
         columns = [columns]
@@ -687,6 +790,8 @@ def select_columns(
     import re as _re
 
     table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
 
     # pyjanitor ``DropLabel`` parity: DropLabel entries exclude columns.
     from .duck_janitor import DropLabel
@@ -783,6 +888,7 @@ def select_rows(
         Relation with selected rows.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
 
     if indices is not None and criteria is None:
         # Select by row indices
@@ -854,6 +960,7 @@ def transform_column(
         # For callable, we need to use a different approach
         # Convert to pandas, apply function, convert back
         table_name = _register_relation(conn, relation)
+        conn = _require_conn(conn)
         query = f"SELECT * FROM {table_name}"
         df = conn.query(query).fetchdf()
 
@@ -862,9 +969,11 @@ def transform_column(
 
         df[target_column] = df[column].apply(func)
 
-        return conn.from_df(df)
+        return conn.from_df(df)  # type: ignore[union-attr]
 
     table_name = _register_relation(conn, relation)
+
+    conn = _require_conn(conn)
 
     if target_column is None or target_column == column:
         # Replace the column
@@ -960,6 +1069,7 @@ def filter_on(
         Filtered relation.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     _validate_sql_fragment(criteria, context="Filter criteria")
 
     if complement:
@@ -1005,6 +1115,7 @@ def filter_string(
         Filtered relation.
     """
     table_name = _register_relation(conn, relation)
+    conn = _require_conn(conn)
     _ensure_columns_exist(relation.columns, [column])
     col = _quote_id(column)
     pat = _sql_literal(search_string)

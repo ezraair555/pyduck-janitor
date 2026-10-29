@@ -16,6 +16,12 @@
 - `pyduck_janitor/duck_janitor.py`: core relation wrapper and public methods
 - `pyduck_janitor/cleaning_ops.py`: core cleaning verbs
 - `pyduck_janitor/cleaning_ops_extended.py`: extended cleaning/reshape verbs
+- `pyduck_janitor/io_ops.py`: native output and write-back (parquet/csv/json/table/arrow/polars)
+- `pyduck_janitor/set_ops.py`: UNION/INTERSECT/EXCEPT and `COLUMNS(* EXCLUDE/REPLACE)`
+- `pyduck_janitor/remote.py`: httpfs loading, S3 credentials, remote file reads
+- `pyduck_janitor/sampling.py`: `USING SAMPLE`, approximate aggregates, Python UDF registration
+- `pyduck_janitor/nested_ops.py`: STRUCT/LIST/JSON verbs
+- `pyduck_janitor/_sqlutil.py`: shared identifier quoting, literal rendering, temp-name allocation
 - `pyduck_janitor/bins_opt.py`: supervised binning (`optimize_bins_to_target`); guide at `docs/supervised_binning.md`
 - `pyduck_janitor/embeddings.py`: optional vector helpers
 - `pyduck_janitor/text_ops.py`: text and full-text-search helpers
@@ -28,3 +34,18 @@
 `from_database`, `metric_from_database`, `metrics`, `profile`, `metric_cube`,
 `rate_metrics`, `cohort_metrics`, `freshness`, `reconcile`, `asof_join`,
 `window_mutate`, `recursive_cte`, `graph_analyze`, `diff`, and `sql`.
+
+Native output and sessions (0.4.0): `to_parquet`, `to_csv`, `to_json`,
+`to_table`, `to_view`, `to_arrow`, `to_polars`, `write_relation`,
+`connect`, `attach`, `detach`, `tables`, `databases`, `show`, `glimpse`,
+`count`, `sample`, `sample_rows`, `approx_distinct`, `approx_quantile`,
+`register_python_function`, `apply_python_function`, `to_struct`,
+`from_struct`, `to_list`, `from_list`, `unnest`, `list_transform`,
+`list_filter`, `json_extract`.
+
+Set operations, remote files, and chainable text/vector verbs (0.4.1):
+`union`, `intersect`, `except_`, `concat_rows`, `select_except`,
+`load_httpfs`, `configure_s3`, `create_s3_secret`, `read_remote`,
+`list_remote`, `is_remote_path`, `text_normalize`, `build_fts_index`,
+`drop_fts_index`, `search_text`, `keyword_filter`, `embed_column`,
+`build_vector_index`, `vector_search`, `fuzzy_dedupe`.

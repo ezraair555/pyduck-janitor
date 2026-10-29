@@ -1153,9 +1153,13 @@ class TestDuckJanitor:
         ).collect()["manager"].tolist() == ["A", "A", "B"]
         assert events.asof_join(
             history, "event_time", "effective_time", by="employee_id", direction="forward"
-        ).collect()["manager"].tolist()[:2] == ["B", "B"] and __import__("pandas").isna(events.asof_join(
-            history, "event_time", "effective_time", by="employee_id", direction="forward"
-        ).collect()["manager"].iloc[2])
+        ).collect()["manager"].tolist()[:2] == ["B", "B"] and __import__("pandas").isna(
+            events.asof_join(
+                history, "event_time", "effective_time", by="employee_id", direction="forward"
+            )
+            .collect()["manager"]
+            .iloc[2]
+        )
         assert events.asof_join(
             history, "event_time", "effective_time", by="employee_id", direction="nearest"
         ).collect()["manager"].tolist() == ["B", "B", "B"]
